@@ -47,11 +47,39 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       (Don't forget about OCaml's 'and' keyword.)
 *)
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
-  failwith "todo: subtype"
+  (*I assume that you don't have to lookup the different types in the environement H*)
+  match (t1, t2) with
+  |(TInt, TInt) -> true 
+  |(TBool, TBool) -> true
+  |(TRef rty1, TRef rty2) -> subtype_ref c rty1 rty2 
+  |(TNullRef rty1, TNullRef rty2)->subtype_ref c rty1 rty2
+  |(TNullRef rty1, TRef rty2)->false
+  |(TRef rty1, TNullRef rty2)->true
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
-  failwith "todo: subtype_ref"
+    match (t1, t2) with
+    |(RString, RString) -> true 
+    |(RStruct id1, RStruct id2) -> 
+      let val1, val2 = Tctxt.lookup_struct id1 c, Tctxt.lookup_struct id2 c in
+      begin match (val1, val2) with
+      |(lst1, ls2) -> true
+      |(_,_) -> false
+      end
+    |(RArray ty1, RArray ty2)->true
+    (*Can a function be a subtype of another function?*)
+    |(RFun(lst1, ret_ty1), RFun(lst2, ret_ty2))->
+      let rec subtype_ref_aux c lst1 lst2 acc =  
+        begin match (lst1, lst2) with
+        (*TODO: check that the return types are also subtypes*)
+        |([x], [y])-> subtype c y x (* && subtype c ret_ty2 ret_ty2*)
+        |((h1::tl1), (h2::tl2))->
+          if subtype c h2 h1 then subtype_ref_aux c lst1 lst2 acc else false
+        |(_,_)->false
+        end
+      in subtype_ref_aux c lst1 lst2 false
+
+    
 
 
 (* well-formed types -------------------------------------------------------- *)
