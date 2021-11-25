@@ -47,14 +47,13 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       (Don't forget about OCaml's 'and' keyword.)
 *)
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
-  (*I assume that you don't have to lookup the different types in the environement H*)
   match (t1, t2) with
   |(TInt, TInt) -> true 
   |(TBool, TBool) -> true
   |(TRef rty1, TRef rty2) -> subtype_ref c rty1 rty2 
   |(TNullRef rty1, TNullRef rty2)->subtype_ref c rty1 rty2
   |(TNullRef rty1, TRef rty2)->false
-  |(TRef rty1, TNullRef rty2)->true
+  |(TRef rty1, TNullRef rty2)->subtype_ref c rty1 rty2
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
@@ -63,21 +62,25 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     |(RStruct id1, RStruct id2) -> 
       let val1, val2 = Tctxt.lookup_struct id1 c, Tctxt.lookup_struct id2 c in
       begin match (val1, val2) with
-      |(lst1, ls2) -> true
+      |(lst1, lst2) -> true
       |(_,_) -> false
       end
     |(RArray ty1, RArray ty2)->true
-    (*Can a function be a subtype of another function?*)
     |(RFun(lst1, ret_ty1), RFun(lst2, ret_ty2))->
       let rec subtype_ref_aux c lst1 lst2 acc =  
         begin match (lst1, lst2) with
-        (*TODO: check that the return types are also subtypes*)
-        |([x], [y])-> subtype c y x (* && subtype c ret_ty2 ret_ty2*)
+        |([x], [y])-> subtype c y x  && subtype_ret c ret_ty1 ret_ty2
         |((h1::tl1), (h2::tl2))->
           if subtype c h2 h1 then subtype_ref_aux c lst1 lst2 acc else false
         |(_,_)->false
         end
       in subtype_ref_aux c lst1 lst2 false
+
+  (*Decides whether H |-r rt1 <: rt2*)
+  and subtype_ret (c: Tctxt.t) (ret_ty1: Ast.ret_ty) (ret_ty2: Ast.ret_ty) : bool = 
+      match (ret_ty1, ret_ty2) with
+      |(RetVoid, RetVoid)->true
+      |(RetVal ty1, RetVal ty2)-> subtype c ty1 ty2
 
     
 
@@ -98,7 +101,34 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     - tc contains the structure definition context
  *)
 let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
-  failwith "todo: implement typecheck_ty"
+  match t with
+  |TInt->()
+  |TBool->()
+  |TRef rty ->typecheck_rty l tc rty 
+  |TNullRef rty1->()
+  |_->type_error l "Not a valid type"
+
+and typecheck_rty (l: 'a Ast.node) (tc : Tctxt.t) (rty : Ast.rty) : unit = 
+  match rty with
+  |RString->()
+  |RArray ty -> typecheck_ty l tc ty
+  |RStruct id -> 
+    let val1 = Tctxt.lookup_struct id tc in
+    begin match val1 with
+    |lst -> ()
+    |_ -> type_error l "Not a valid struct in the context."
+    end
+  |RFun(types, ret_ty)->
+    let res = List.fold_left (fun tmp ty ->
+      if typecheck_ty l tc ty == () then () else type_error l "One of the types in the function are not valid" 
+      ) () types
+    in 
+    typecheck_ret_ty l tc ret_ty 
+
+and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (ret_ty : Ast.ret_ty) : unit = 
+  match ret_ty with
+  |RetVoid->()
+  |RetVal ty -> typecheck_ty l tc ty
 
 (* typechecking expressions ------------------------------------------------- *)
 (* Typechecks an expression in the typing context c, returns the type of the
@@ -126,7 +156,19 @@ let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
 
 *)
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
-  failwith "todo: implement typecheck_exp"
+  let l = no_loc () in 
+  match e.elt with
+  |CNull rty -> 
+    if typecheck_rty l c rty == () then TNullRef rty else type_error l "TYP_NULL not valid" 
+  |CBool b -> TBool
+  |CInt i -> TInt
+  |CStr s -> TRef RString 
+  (*TODO: do we have to lookup for locals and globals in the context?*)
+  |Id id -> 
+    let x = Tctxt.lookup id c in
+    if typecheck_ty l c x == () then x else type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
+  
+  
 
 (* statements --------------------------------------------------------------- *)
 
