@@ -163,11 +163,53 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   |CBool b -> TBool
   |CInt i -> TInt
   |CStr s -> TRef RString 
-  (*TODO: do we have to lookup for locals and globals in the context?*)
   |Id id -> 
-    let x = Tctxt.lookup id c in
-    if typecheck_ty l c x == () then x else type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
+    begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
+    |(Some x,_)->x
+    |(None, Some x)->x
+    |_->type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
+    end
+
+  |CArr(ty, exps) -> 
+    let res = List.iter (fun exp -> 
+      let sub = typecheck_exp c e in
+      let is_sub = subtype c sub ty in
+      if is_sub then typecheck_ty l c sub else type_error l "TYP_CARR Not a subtype"
+      ) exps
+    in 
+    let res2 = typecheck_ty l c ty in
+    if res == () && res2 == () then ty else type_error l "TYP_CARR not valid"
+  |_-> type_error l "Failed to typecheck the expression"
+
+  |NewArr(ty, exp1, id, exp2) -> 
+    let is_int = begin match (typecheck_exp c exp1) with
+    |TInt->true
+    |_->type_error l "TYP_NEWARR Length is not an integer"; false
+    end in
+    let is_global = begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
+    |(Some x, _) -> type_error l "TYP_NEWARR the id cannot be a local"; false 
+    |(None, Some x)-> true
+    |(_,_)-> type_error l "TYP_NEWARR the id is not global"; false
+    end in
+    let is_sub = begin match (typecheck_exp c exp2) with
+    |t'-> subtype c t' ty
+    |_->type_error l "TYP_NEWARR is not subtype"
+    end in
+    if is_int && is_global && is_sub then TRef(RArray ty) else type_error l "TY_NEWARR not valid"
   
+  |Index(n1, n2) -> 
+    begin match (typecheck_exp c n1, typecheck_exp c n2) with
+    | (TRef(RArray t), TInt) -> t
+    | (_,_) -> type_error l "TYP_INDEX not valid"
+    end
+  
+  |Length exp -> 
+      begin match (typecheck_exp c exp) with
+      | TRef(RArray t) -> TInt
+      | _ -> type_error l "TYP_LENGTH not valid"
+      end
+  
+
   
 
 (* statements --------------------------------------------------------------- *)
@@ -205,6 +247,8 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 *)
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
   failwith "todo: implement typecheck_stmt"
+
+(*TODO: add helper function for typecheck_block *)
 
 
 (* struct type declarations ------------------------------------------------- *)
@@ -261,7 +305,27 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
    constants, but can't mention other global values *)
 
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_struct_ctxt"
+  print_endline (Astlib.ml_string_of_prog p);
+  let c = Tctxt.empty in
+  (*TODO: think it is better to change this to List.fold_left *)
+  let rec create_struct_ctxt_aux p acc = 
+    begin match p with
+  | [] -> acc
+  | (h::tl) -> 
+    begin match h with
+    (* | Gvdecl g->  *)
+    | Gtdecl t ->
+      begin match t.elt with
+      | (id, fields) -> 
+        begin match (Tctxt.lookup_struct_option id c) with
+        | Some s -> failwith "Cannot add struct if it already exists"
+        | None -> 
+          Tctxt.add_struct acc id fields
+        end
+      end
+    end
+  end
+  in create_struct_ctxt_aux p Tctxt.empty
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   failwith "todo: create_function_ctxt"
