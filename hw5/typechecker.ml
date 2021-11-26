@@ -208,9 +208,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
       | TRef(RArray t) -> TInt
       | _ -> type_error l "TYP_LENGTH not valid"
       end
-  
-
-  
 
 (* statements --------------------------------------------------------------- *)
 
@@ -246,10 +243,31 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
      block typecheck rules.
 *)
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
-  failwith "todo: implement typecheck_stmt"
+  begin match s.elt with
+  |Assn(lhs, exp) -> 
+    (*Check that the lhs expression is a local or that it does not have a global id*)
+    begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
+    (*lhs = exp*)
+    |(t, t') -> if (subtype tc t' t) then (tc, false) else type_error s "TYP_ASSN not valid"
+    end
+  end
 
 (*TODO: add helper function for typecheck_block *)
-
+(*TODO: wtf shall this return*)
+let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Tctxt.t * ret_ty = 
+  (* List.fold_left (fun (bl, ret) -> 
+    ) (tc, ret) b
+ *)
+  (**TODO: check that the last statement has the right return type *)
+  let rec typecheck_block_aux tc b ret acc = 
+    begin match b with
+    |[] -> acc
+    |[s] -> 
+      begin match (typecheck_stmt tc s ret) with
+      |(ctxt,will_ret)-> if will_ret then (ctxt, ret) else type_error s ""
+      end
+    end
+  in typecheck_block_aux tc b ret (tc, ret) 
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
@@ -275,8 +293,17 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - checks that the function actually returns
 *)
 let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
-  failwith "todo: typecheck_fdecl"
+  (*Add all the arguments to the local context*)
+  List.map(fun arg ->
+    begin match (Tctxt.lookup_local_option (snd arg) tc) with
+    |Some x -> failwith "Arg is already in the local context"
+    |None -> Tctxt.add_local tc (snd arg) (fst arg)
+    end
+    ) f.args;
+  (**Typecheck the body of the function *)
+  failwith "typecheck_fdecl not finished yet"
 
+(* let typecheck_block (tc : Tctxt.t) (b : Ast.block) (l : 'a Ast.node) : unit =   *)
 (* creating the typchecking context ----------------------------------------- *)
 
 (* The following functions correspond to the
@@ -305,33 +332,56 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
    constants, but can't mention other global values *)
 
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  print_endline (Astlib.ml_string_of_prog p);
   let c = Tctxt.empty in
-  (*TODO: think it is better to change this to List.fold_left *)
   let rec create_struct_ctxt_aux p acc = 
     begin match p with
   | [] -> acc
   | (h::tl) -> 
     begin match h with
-    (* | Gvdecl g->  *)
     | Gtdecl t ->
       begin match t.elt with
       | (id, fields) -> 
         begin match (Tctxt.lookup_struct_option id c) with
         | Some s -> failwith "Cannot add struct if it already exists"
         | None -> 
-          Tctxt.add_struct acc id fields
+          Tctxt.add_struct c id fields;
+          create_struct_ctxt_aux tl acc
         end
       end
     end
   end
-  in create_struct_ctxt_aux p Tctxt.empty
+  in create_struct_ctxt_aux p c
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+  List.fold_left(fun c el -> 
+    begin match el with
+    |Gfdecl f ->
+      begin match f.elt with
+      |fdecl -> 
+        List.fold_left(fun c arg -> 
+          begin match (Tctxt.lookup_local_option (snd arg) tc) with
+          |Some x -> failwith "is already in the context"
+          |None -> Tctxt.add_local c (snd arg) (fst arg)
+          end
+          ) c fdecl.args
+        end
+    end
+    ) tc p
 
+(*TODO: is this the right way to create the global context*)
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+  List.fold_left (fun c el -> 
+    begin match el with
+    |Gvdecl g ->
+      begin match g.elt with
+      |gdecl ->
+        begin match (Tctxt.lookup_global_option gdecl.name c) with
+        |Some x -> failwith "Global declaration already in the context"
+        |None -> Tctxt.add_global c gdecl.name (typecheck_exp c gdecl.init)
+        end
+      end
+    end
+    ) tc p
 
 
 (* This function implements the |- prog and the H ; G |- prog 
