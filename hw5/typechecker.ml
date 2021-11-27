@@ -252,22 +252,19 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     end
   end
 
-(*TODO: add helper function for typecheck_block *)
-(*TODO: wtf shall this return*)
-let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Tctxt.t * ret_ty = 
-  (* List.fold_left (fun (bl, ret) -> 
-    ) (tc, ret) b
- *)
-  (**TODO: check that the last statement has the right return type *)
+let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
   let rec typecheck_block_aux tc b ret acc = 
     begin match b with
-    |[] -> acc
     |[s] -> 
       begin match (typecheck_stmt tc s ret) with
-      |(ctxt,will_ret)-> if will_ret then (ctxt, ret) else type_error s ""
+      |(c,will_ret)-> if will_ret then () else type_error s "TYP_BLOCK Block might not return"
+      end
+    |(h::tl) -> 
+      begin match (typecheck_stmt tc h ret) with
+      |(c, b) -> if b == false then typecheck_block_aux tc tl ret () else type_error h "TYP_BLOCK the return does not happen in the last statement"
       end
     end
-  in typecheck_block_aux tc b ret (tc, ret) 
+  in typecheck_block_aux tc b ret ()
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
@@ -292,7 +289,7 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - typechecks the body of the function (passing in the expected return type
     - checks that the function actually returns
 *)
-let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
+let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
   (*Add all the arguments to the local context*)
   List.map(fun arg ->
     begin match (Tctxt.lookup_local_option (snd arg) tc) with
