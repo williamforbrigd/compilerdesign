@@ -47,34 +47,48 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       (Don't forget about OCaml's 'and' keyword.)
 *)
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
-  match (t1, t2) with
-  |(TInt, TInt) -> true 
-  |(TBool, TBool) -> true
-  |(TRef rty1, TRef rty2) -> subtype_ref c rty1 rty2 
-  |(TNullRef rty1, TNullRef rty2)->subtype_ref c rty1 rty2
-  |(TNullRef rty1, TRef rty2)->false
-  |(TRef rty1, TNullRef rty2)->subtype_ref c rty1 rty2
+  match t1, t2 with
+  |TInt, TInt -> true 
+  |TBool, TBool -> true
+  |TNullRef rty1, TNullRef rty2
+  |TRef rty1, TRef rty2
+  |TRef rty1, TNullRef rty2 -> subtype_ref c rty1 rty2
+  |_,_ -> false
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     match (t1, t2) with
     |(RString, RString) -> true 
-    |(RStruct id1, RStruct id2) -> 
-      let val1, val2 = Tctxt.lookup_struct id1 c, Tctxt.lookup_struct id2 c in
-      begin match (val1, val2) with
-      |(lst1, lst2) -> true
-      |(_,_) -> false
-      end
     |(RArray ty1, RArray ty2)->true
+    |(RStruct id1, RStruct id2) -> 
+      begin match (Tctxt.lookup_struct_option id1 c, Tctxt.lookup_struct_option id2 c) with
+      | Some lst1, Some lst2 -> true
+      | _,_ -> false
+      end
     |(RFun(lst1, ret_ty1), RFun(lst2, ret_ty2))->
-      let rec subtype_ref_aux c lst1 lst2 acc =  
-        begin match (lst1, lst2) with
-        |([x], [y])-> subtype c y x  && subtype_ret c ret_ty1 ret_ty2
-        |((h1::tl1), (h2::tl2))->
-          if subtype c h2 h1 then subtype_ref_aux c lst1 lst2 acc else false
-        |(_,_)->false
-        end
-      in subtype_ref_aux c lst1 lst2 false
+      (**Alternativ *)
+      (* let (_ , is_sub) = List.fold_left (fun (i, is_sub) el1 ->
+        if subtype c (List.nth lst2 i) el1 then (i+1, true) else (i+1, false)
+        ) (0, false) lst1
+      *)
+      (**Alternativ *)
+      (* let (_, is_sub) = List.fold_left (fun (i, is_sub) el1 -> 
+        if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
+        ) (List.length lst2, false) (List.rev lst1) *)
+
+      let (_, is_sub) = List.fold_right (fun el1 (i, is_sub) -> 
+        if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
+        ) lst1 (List.length lst2, false)
+      in is_sub && subtype_ret c ret_ty1 ret_ty2
+      
+      (*Alternativ*)
+      (* let arr = List.mapi (fun lst1_pos el1 -> 
+        if subtype c (List.nth lst2 lst1_pos) el1 then lst1_pos else 0
+      ) lst1
+      in 
+      if (List.nth arr (List.length arr-1) == List.length lst1 - 1) then subtype_ret c ret_ty1 ret_ty2 else false *)
+      
+    |_,_ -> false
 
   (*Decides whether H |-r rt1 <: rt2*)
   and subtype_ret (c: Tctxt.t) (ret_ty1: Ast.ret_ty) (ret_ty2: Ast.ret_ty) : bool = 
@@ -104,8 +118,7 @@ let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
   match t with
   |TInt->()
   |TBool->()
-  |TRef rty ->typecheck_rty l tc rty 
-  |TNullRef rty1->()
+  |TRef rty | TNullRef rty -> typecheck_rty l tc rty
   |_->type_error l "Not a valid type"
 
 and typecheck_rty (l: 'a Ast.node) (tc : Tctxt.t) (rty : Ast.rty) : unit = 
@@ -113,16 +126,12 @@ and typecheck_rty (l: 'a Ast.node) (tc : Tctxt.t) (rty : Ast.rty) : unit =
   |RString->()
   |RArray ty -> typecheck_ty l tc ty
   |RStruct id -> 
-    let val1 = Tctxt.lookup_struct id tc in
-    begin match val1 with
-    |lst -> ()
-    |_ -> type_error l "Not a valid struct in the context."
+    begin match (Tctxt.lookup_struct_option id tc) with
+    | Some x -> ()
+    | None -> type_error l "WF_REFTOKOKSTRUCT not valid"
     end
   |RFun(types, ret_ty)->
-    let res = List.fold_left (fun tmp ty ->
-      if typecheck_ty l tc ty == () then () else type_error l "One of the types in the function are not valid" 
-      ) () types
-    in 
+    let res = List.fold_left (fun tmp ty -> typecheck_ty l tc ty) () types in 
     typecheck_ret_ty l tc ret_ty 
 
 and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (ret_ty : Ast.ret_ty) : unit = 
@@ -158,8 +167,9 @@ and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (ret_ty : Ast.ret_ty) : un
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   let l = no_loc () in 
   match e.elt with
-  |CNull rty -> 
-    if typecheck_rty l c rty == () then TNullRef rty else type_error l "TYP_NULL not valid" 
+  |CNull rty -> TNullRef rty
+  (* |CNull rty ->  *)
+    (* if typecheck_rty l c rty == () then TNullRef rty else type_error l "TYP_NULL not valid"  *)
   |CBool b -> TBool
   |CInt i -> TInt
   |CStr s -> TRef RString 
@@ -170,16 +180,14 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     |_->type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
     end
 
+  (*Should the list here be sorted? *)
   |CArr(ty, exps) -> 
-    let res = List.iter (fun exp -> 
-      let sub = typecheck_exp c e in
-      let is_sub = subtype c sub ty in
-      if is_sub then typecheck_ty l c sub else type_error l "TYP_CARR Not a subtype"
-      ) exps
+    let is_valid = List.fold_left (fun is_valid exp -> 
+      let ty_checked = typecheck_exp c exp in
+      subtype c ty_checked ty
+      ) false (List.sort compare exps)
     in 
-    let res2 = typecheck_ty l c ty in
-    if res == () && res2 == () then ty else type_error l "TYP_CARR not valid"
-  |_-> type_error l "Failed to typecheck the expression"
+    if is_valid then TRef(RArray ty) else type_error l "TYP_CARR not a valid type"
 
   |NewArr(ty, exp1, id, exp2) -> 
     let is_int = begin match (typecheck_exp c exp1) with
@@ -252,19 +260,15 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     end
   end
 
+(*TODO: when you typecheck statements, do you just have to check that the last statement returns? *)
+and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
+  List.fold_left (fun (c, will_ret) stmt -> 
+    typecheck_stmt tc stmt to_ret
+    ) (tc, false) stmts
+
 let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
-  let rec typecheck_block_aux tc b ret acc = 
-    begin match b with
-    |[s] -> 
-      begin match (typecheck_stmt tc s ret) with
-      |(c,will_ret)-> if will_ret then () else type_error s "TYP_BLOCK Block might not return"
-      end
-    |(h::tl) -> 
-      begin match (typecheck_stmt tc h ret) with
-      |(c, b) -> if b == false then typecheck_block_aux tc tl ret () else type_error h "TYP_BLOCK the return does not happen in the last statement"
-      end
-    end
-  in typecheck_block_aux tc b ret ()
+  let c, will_ret = typecheck_stmts tc b ret in
+  if will_ret then () else type_error (no_loc ()) "hei"
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
@@ -291,6 +295,7 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
 *)
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
   (*Add all the arguments to the local context*)
+  (*TODO: check if the fields are distinct using the function over *)
   List.map(fun arg ->
     begin match (Tctxt.lookup_local_option (snd arg) tc) with
     |Some x -> failwith "Arg is already in the local context"
@@ -329,39 +334,35 @@ let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
    constants, but can't mention other global values *)
 
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  let c = Tctxt.empty in
-  let rec create_struct_ctxt_aux p acc = 
-    begin match p with
-  | [] -> acc
-  | (h::tl) -> 
-    begin match h with
-    | Gtdecl t ->
-      begin match t.elt with
-      | (id, fields) -> 
-        begin match (Tctxt.lookup_struct_option id c) with
-        | Some s -> failwith "Cannot add struct if it already exists"
-        | None -> 
-          Tctxt.add_struct c id fields;
-          create_struct_ctxt_aux tl acc
-        end
+  let tc = Tctxt.empty in
+  List.fold_left (fun c el -> 
+    begin match el with
+    |Gvdecl g -> c
+    |Gfdecl f -> c
+    |Gtdecl t ->
+      begin match (lookup_struct_option (fst t.elt) c) with
+      |Some x -> failwith "Cannot add struct if already exists"
+      |None -> 
+        if check_dups (snd t.elt) then failwith "Cannot add struct because there are duplicate fields"
+        else Tctxt.add_struct c (fst t.elt) (snd t.elt)
       end
+    |_-> c
     end
-  end
-  in create_struct_ctxt_aux p c
+    ) tc p
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   List.fold_left(fun c el -> 
     begin match el with
+    |Gtdecl t -> c
+    |Gvdecl g -> c
     |Gfdecl f ->
-      begin match f.elt with
-      |fdecl -> 
-        List.fold_left(fun c arg -> 
-          begin match (Tctxt.lookup_local_option (snd arg) tc) with
-          |Some x -> failwith "is already in the context"
-          |None -> Tctxt.add_local c (snd arg) (fst arg)
-          end
-          ) c fdecl.args
+      List.fold_left(fun c arg -> 
+        begin match (Tctxt.lookup_global_option(snd arg) tc) with
+        |Some x -> failwith "Function argument is already in the context"
+        |None -> Tctxt.add_local c (snd arg) (fst arg)
         end
+        ) c f.elt.args
+    |_ -> c
     end
     ) tc p
 
@@ -369,6 +370,8 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   List.fold_left (fun c el -> 
     begin match el with
+    |Gtdecl t -> c
+    |Gfdecl f -> c
     |Gvdecl g ->
       begin match g.elt with
       |gdecl ->
@@ -377,6 +380,7 @@ let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
         |None -> Tctxt.add_global c gdecl.name (typecheck_exp c gdecl.init)
         end
       end
+    |_ -> c
     end
     ) tc p
 
