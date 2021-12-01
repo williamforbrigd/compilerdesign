@@ -66,6 +66,11 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
       | _,_ -> false
       end
     |(RFun(lst1, ret_ty1), RFun(lst2, ret_ty2))->
+      let all_is_sub = List.for_all2 (fun el1 el2 ->
+        subtype c el2 el1
+        ) lst1 lst2
+      in 
+      all_is_sub && subtype_ret c ret_ty1 ret_ty2
       (**Alternativ *)
       (* let (_ , is_sub) = List.fold_left (fun (i, is_sub) el1 ->
         if subtype c (List.nth lst2 i) el1 then (i+1, true) else (i+1, false)
@@ -76,18 +81,17 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
         if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
         ) (List.length lst2, false) (List.rev lst1) *)
 
-      let (_, is_sub) = List.fold_right (fun el1 (i, is_sub) -> 
+      (* let (_, is_sub) = List.fold_right (fun el1 (i, is_sub) -> 
         if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
         ) lst1 (List.length lst2, false)
       in is_sub && subtype_ret c ret_ty1 ret_ty2
-      
+       *)
       (*Alternativ*)
       (* let arr = List.mapi (fun lst1_pos el1 -> 
         if subtype c (List.nth lst2 lst1_pos) el1 then lst1_pos else 0
       ) lst1
       in 
       if (List.nth arr (List.length arr-1) == List.length lst1 - 1) then subtype_ret c ret_ty1 ret_ty2 else false *)
-      
     |_,_ -> false
 
   (*Decides whether H |-r rt1 <: rt2*)
@@ -95,6 +99,7 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
       match (ret_ty1, ret_ty2) with
       |(RetVoid, RetVoid)->true
       |(RetVal ty1, RetVal ty2)-> subtype c ty1 ty2
+      |(_,_) -> false
 
     
 
@@ -217,6 +222,83 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
       | _ -> type_error l "TYP_LENGTH not valid"
       end
 
+  |CStruct(id, expsi) -> 
+    begin match (Tctxt.lookup_struct_option id c) with
+    |Some fields ->
+      let all_is_sub = List.for_all2 (fun field exp ->
+        let t' = typecheck_exp c (snd exp) in 
+        subtype c t' field.ftyp
+        ) fields expsi
+      in 
+      if all_is_sub then TRef(RStruct id) else type_error e "TYP_STRUCTEX not all are subtypes"
+    |None -> type_error e "TYP_STRUCTEX The struct has to already exist"
+    end
+  
+  |Proj(exp, id) ->
+    begin match typecheck_exp c exp with
+    |TRef(RStruct struct_id) ->
+      begin match Tctxt.lookup_struct_option struct_id c with
+      |Some fields ->
+        let does_exist = List.exists (fun field -> 
+          id = field.fieldName
+          ) fields
+        in
+        if does_exist then Tctxt.lookup id c else type_error e "TYP_FIELD cannot find the id in the struct"
+      |None -> type_error e "TYP_FIELD cannot find the struct"
+      end
+    |_ -> type_error e "TYP_FIELD the exp has to be a struct"
+    end
+
+  |Call(exp, exps) -> 
+    begin match typecheck_exp c exp with
+    |TRef(RFun(types, ret_ty)) ->
+      begin match ret_ty with
+      |RetVal ty -> 
+        let all_is_sub = List.for_all2 (fun exp t ->
+          let t' = typecheck_exp c exp in
+          subtype c t' t
+          ) exps types
+        in
+        if all_is_sub then ty else type_error e "TYP_CALL all need to be sub"
+      |_ -> type_error e "TYP_CALL the function need a return type"
+      end
+    |_-> type_error e "TYP_CALL the expression has to evaluate to a function for it to be called"
+    end
+
+  |Bop(binop, exp1, exp2) ->
+    begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
+    |t1, t2 ->
+      let t1', t2', ret_ty = typ_of_binop binop in
+      if t1 == t1' && t2 == t2' then ret_ty else type_error e "TYP_BINOP the types does not match"
+    |_->type_error e "TYP_BINOP the expressions does not evaluate to types"
+    end
+
+  |Uop(unop, exp) ->
+    let t, ret_ty = typ_of_unop unop in
+    let t' = typecheck_exp c exp in
+    if t == t' then ret_ty else type_error e "TYP_UOP the types does not match"
+
+
+(*Variable declarations
+typecheck them and add them to the local context if they don't exist
+*)
+(*When you typechekc the vdecl should you return the type as well as the context?*)
+(*TODO: lets just return this for now*)
+let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
+  begin match Tctxt.lookup_option (fst vdecl) tc with
+  |Some x -> failwith "TYP_DECL not valid. Already in the context"
+  |None -> 
+    let t = typecheck_exp tc (snd vdecl) in
+    Tctxt.add_local tc (fst vdecl) t
+    (* (fst vdecl), t *)
+  end
+
+let typecheck_vdecls (tc : Tctxt.t) (vdecls : (Ast.id * Ast.exp Ast.node) list ) : Tctxt.t =
+  List.fold_left (fun tc vdecl -> 
+    typecheck_vdecl tc vdecl 
+    ) tc vdecls
+
+
 (* statements --------------------------------------------------------------- *)
 
 (* Typecheck a statement 
@@ -251,24 +333,106 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
      block typecheck rules.
 *)
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
-  begin match s.elt with
+  match s.elt with
   |Assn(lhs, exp) -> 
     (*Check that the lhs expression is a local or that it does not have a global id*)
     begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
     (*lhs = exp*)
     |(t, t') -> if (subtype tc t' t) then (tc, false) else type_error s "TYP_ASSN not valid"
     end
-  end
 
-(*TODO: when you typecheck statements, do you just have to check that the last statement returns? *)
+  |Decl vdecl -> 
+    typecheck_vdecl tc vdecl, false 
+
+  |Ret(opt) -> 
+    begin match opt with
+    |Some exp ->
+      begin match to_ret with
+      |RetVal ty -> 
+        begin match typecheck_exp tc exp with
+        |t' -> if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
+        |_ -> type_error s "TYP_RETT not valid"
+        end
+      |RetVoid -> type_error s "TYP_RETT should not return void"
+      end
+    |None ->
+      begin match to_ret with
+      |RetVoid -> tc, true
+      |_ -> type_error s "TYP_RETVOID not valid"
+      end
+    end
+
+  |SCall(exp, exps) -> 
+    begin match (typecheck_exp tc exp) with
+    |TRef(rty) | TNullRef rty -> 
+      begin match rty with
+      |RFun(types, ret_ty) -> 
+        begin match ret_ty with
+        |RetVoid -> 
+          let all_is_sub = List.for_all2 (fun expi t -> 
+            let t' = typecheck_exp tc expi in 
+            if subtype tc t' t then true else false
+            ) exps types
+          in 
+          if all_is_sub then tc, false else type_error s "TYP_SCALL not all subtypes"
+        |_->type_error s "TYP_SCALL expression does not return void"
+        end
+      end
+    end
+
+  |If(exp, b1, b2) -> 
+    begin match (typecheck_exp tc exp) with
+    |TBool ->
+      let (_, r1) = typecheck_stmts tc b1 to_ret in
+      let (_, r2) = typecheck_stmts tc b2 to_ret in
+      tc, r1 && r2
+    (*TODO: do you have to check TNullRef as well*)
+    (* |TNullRef rty ->  *)
+    |_-> type_error s "TYP_IF or TYP_IFQ not valid"
+    end
+
+  |While(exp, stmts) -> 
+    begin match typecheck_exp tc exp with
+    |TBool ->
+      typecheck_stmts tc stmts to_ret
+    |_ -> type_error s "TYP_WHILE the expression is not a boolean"
+    end
+
+  |For(vdecls, exp_opt, stmt_opt, stmts) -> 
+    typecheck_vdecls tc vdecls;
+    typecheck_stmts tc stmts to_ret;
+    begin match (exp_opt, stmt_opt) with
+    |Some exp, Some stmt ->
+      begin match (typecheck_exp tc exp, typecheck_stmt tc stmt to_ret) with
+      |(TBool, (c, will_ret)) -> 
+        if will_ret then type_error stmt "TYP_FOR statement has to not return" else tc, false
+      end
+    |_, Some stmt -> type_error s "TYP_FOR none or both has to be present"
+    |Some exp, _ -> type_error s "TYP_FOR none or both has to be present"
+    end
+  |_ -> type_error s "Not a valid statement"
+
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
-  List.fold_left (fun (c, will_ret) stmt -> 
+List.fold_left (fun (c, will_ret) stmt -> 
     typecheck_stmt tc stmt to_ret
     ) (tc, false) stmts
 
-let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
+(* let (_,num_false,last_ret,c) = List.fold_left (fun (i, num_false, last_ret, c) stmt -> 
+  if i == ((List.length stmts) - 1) then 
+    let con,ret_val = typecheck_stmt tc stmt to_ret in
+    (i+1, num_false, ret_val, con)
+  else
+    let con, ret_val = typecheck_stmt tc stmt to_ret in
+    if ret_val == false then (i+1, num_false+1, false, con) else (i+1, num_false, false, con)
+  ) (0, 0, false, tc) stmts
+in
+if num_false == List.length stmts-2 then c,last_ret else failwith "TYP_STMTS all the statements before the last one must be false" *)
+
+ let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
   let c, will_ret = typecheck_stmts tc b ret in
-  if will_ret then () else type_error (no_loc ()) "hei"
+  if will_ret then () else type_error (no_loc ()) "The block has to return"
+
+
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
@@ -293,17 +457,31 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - typechecks the body of the function (passing in the expected return type
     - checks that the function actually returns
 *)
+
+let rec check_dups2 (types: (Ast.id * Ast.ty) list) = 
+  match types with
+  | [] -> false
+  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups2 t
+
+(*TODO: check the dups of the struct*)
+let rec check_dups_struct (types: (Ast.id * Ast.field list) list) = 
+  match types with
+  | [] -> false
+  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups_struct t
+
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
   (*Add all the arguments to the local context*)
   (*TODO: check if the fields are distinct using the function over *)
-  List.map(fun arg ->
-    begin match (Tctxt.lookup_local_option (snd arg) tc) with
-    |Some x -> failwith "Arg is already in the local context"
-    |None -> Tctxt.add_local tc (snd arg) (fst arg)
-    end
-    ) f.args;
-  (**Typecheck the body of the function *)
-  failwith "typecheck_fdecl not finished yet"
+  (* if check_dups2 f.args then failwith "there are duplicate fields in the arguments"
+  else (
+    List.map(fun arg ->
+      begin match (Tctxt.lookup_local_option (snd arg) tc) with
+      |Some x -> failwith "Arg is already in the local context"
+      |None -> Tctxt.add_local tc (snd arg) (fst arg)
+      end
+      ) f.args
+  ); *)
+  typecheck_block tc f.body f.frtyp
 
 (* let typecheck_block (tc : Tctxt.t) (b : Ast.block) (l : 'a Ast.node) : unit =   *)
 (* creating the typchecking context ----------------------------------------- *)
