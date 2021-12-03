@@ -430,7 +430,7 @@ if num_false == List.length stmts-2 then c,last_ret else failwith "TYP_STMTS all
 
  let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
   let c, will_ret = typecheck_stmts tc b ret in
-  if will_ret then () else type_error (no_loc ()) "The block has to return"
+  if will_ret then () else type_error (no_loc ()) "the block has to return" 
 
 
 
@@ -488,9 +488,9 @@ let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
       end
       ) f.args
   ); *)
-  (* typecheck_block tc f.body f.frtyp *)
-  let c, will_ret = typecheck_stmts tc f.body f.frtyp in 
-  if will_ret then () else failwith "Will not return"
+  typecheck_block tc f.body f.frtyp
+  (* let c, will_ret = typecheck_stmts tc f.body f.frtyp in  *)
+  (* if will_ret then () else failwith "Will not return" *)
 
 (* let typecheck_block (tc : Tctxt.t) (b : Ast.block) (l : 'a Ast.node) : unit =   *)
 (* creating the typchecking context ----------------------------------------- *)
