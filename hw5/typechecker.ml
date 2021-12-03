@@ -479,7 +479,7 @@ let rec check_dups_args (args : (Ast.ty * Ast.id) list) : bool =
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
   (*Add all the arguments to the local context*)
   (*TODO: check if the fields are distinct using the function over *)
-  if check_dups_args f.args then failwith "there are duplicate fields in the arguments"
+  (* if check_dups_args f.args then failwith "there are duplicate fields in the arguments"
   else (
     List.map(fun arg ->
       begin match (Tctxt.lookup_local_option (snd arg) tc) with
@@ -487,7 +487,7 @@ let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
       |None -> Tctxt.add_local tc (snd arg) (fst arg)
       end
       ) f.args
-  );
+  ); *)
   (* typecheck_block tc f.body f.frtyp *)
   let c, will_ret = typecheck_stmts tc f.body f.frtyp in 
   if will_ret then () else failwith "Will not return"
