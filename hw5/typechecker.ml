@@ -182,7 +182,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
     |(Some x,_)->x
     |(None, Some x)->x
-    |_->type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
+    |_,_->type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
     end
 
   (*Should the list here be sorted? *)
@@ -445,6 +445,18 @@ let rec check_dups fs =
   | [] -> false
   | h :: t -> (List.exists (fun x -> x.fieldName = h.fieldName) t) || check_dups t
 
+let rec check_dups2 (types: (Ast.id * Ast.ty) list) = 
+  match types with
+  | [] -> false
+  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups2 t
+
+let rec check_dups_struct (types: (Ast.id * Ast.field list) list) = 
+  match types with
+  | [] -> false
+  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups_struct t
+
+
+
 let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
   if check_dups fs
   then type_error l ("Repeated fields in " ^ id) 
@@ -458,21 +470,16 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - checks that the function actually returns
 *)
 
-let rec check_dups2 (types: (Ast.id * Ast.ty) list) = 
-  match types with
-  | [] -> false
-  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups2 t
-
-(*TODO: check the dups of the struct*)
-let rec check_dups_struct (types: (Ast.id * Ast.field list) list) = 
-  match types with
-  | [] -> false
-  | h :: t -> (List.exists (fun x -> fst x = fst h) t) || check_dups_struct t
+let rec check_dups_args (args : (Ast.ty * Ast.id) list) : bool = 
+  begin match args with
+  |[] -> false  
+  |h::tl -> (List.exists (fun arg -> snd h == snd arg) args) ||check_dups_args tl
+  end
 
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
   (*Add all the arguments to the local context*)
   (*TODO: check if the fields are distinct using the function over *)
-  (* if check_dups2 f.args then failwith "there are duplicate fields in the arguments"
+  if check_dups_args f.args then failwith "there are duplicate fields in the arguments"
   else (
     List.map(fun arg ->
       begin match (Tctxt.lookup_local_option (snd arg) tc) with
@@ -480,8 +487,10 @@ let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
       |None -> Tctxt.add_local tc (snd arg) (fst arg)
       end
       ) f.args
-  ); *)
-  typecheck_block tc f.body f.frtyp
+  );
+  (* typecheck_block tc f.body f.frtyp *)
+  let c, will_ret = typecheck_stmts tc f.body f.frtyp in 
+  if will_ret then () else failwith "Will not return"
 
 (* let typecheck_block (tc : Tctxt.t) (b : Ast.block) (l : 'a Ast.node) : unit =   *)
 (* creating the typchecking context ----------------------------------------- *)
