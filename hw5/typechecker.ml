@@ -71,27 +71,6 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
         ) lst1 lst2
       in 
       all_is_sub && subtype_ret c ret_ty1 ret_ty2
-      (**Alternativ *)
-      (* let (_ , is_sub) = List.fold_left (fun (i, is_sub) el1 ->
-        if subtype c (List.nth lst2 i) el1 then (i+1, true) else (i+1, false)
-        ) (0, false) lst1
-      *)
-      (**Alternativ *)
-      (* let (_, is_sub) = List.fold_left (fun (i, is_sub) el1 -> 
-        if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
-        ) (List.length lst2, false) (List.rev lst1) *)
-
-      (* let (_, is_sub) = List.fold_right (fun el1 (i, is_sub) -> 
-        if subtype c (List.nth lst2 i) el1 then (i-1, true) else (i-1, false)
-        ) lst1 (List.length lst2, false)
-      in is_sub && subtype_ret c ret_ty1 ret_ty2
-       *)
-      (*Alternativ*)
-      (* let arr = List.mapi (fun lst1_pos el1 -> 
-        if subtype c (List.nth lst2 lst1_pos) el1 then lst1_pos else 0
-      ) lst1
-      in 
-      if (List.nth arr (List.length arr-1) == List.length lst1 - 1) then subtype_ret c ret_ty1 ret_ty2 else false *)
     |_,_ -> false
 
   (*Decides whether H |-r rt1 <: rt2*)
@@ -100,8 +79,6 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
       |(RetVoid, RetVoid)->true
       |(RetVal ty1, RetVal ty2)-> subtype c ty1 ty2
       |(_,_) -> false
-
-    
 
 
 (* well-formed types -------------------------------------------------------- *)
@@ -136,7 +113,7 @@ and typecheck_rty (l: 'a Ast.node) (tc : Tctxt.t) (rty : Ast.rty) : unit =
     | None -> type_error l "WF_REFTOKOKSTRUCT not valid"
     end
   |RFun(types, ret_ty)->
-    let res = List.fold_left (fun tmp ty -> typecheck_ty l tc ty) () types in 
+    let res = List.iter(fun ty -> typecheck_ty l tc ty) types in
     typecheck_ret_ty l tc ret_ty 
 
 and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (ret_ty : Ast.ret_ty) : unit = 
@@ -172,12 +149,12 @@ and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (ret_ty : Ast.ret_ty) : un
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   let l = no_loc () in 
   match e.elt with
-  |CNull rty -> TNullRef rty
-  (* |CNull rty ->  *)
-    (* if typecheck_rty l c rty == () then TNullRef rty else type_error l "TYP_NULL not valid"  *)
+  |CNull rty -> 
+    if typecheck_rty l c rty == () then TNullRef rty else type_error l "TYP_NULL not valid" 
   |CBool b -> TBool
   |CInt i -> TInt
   |CStr s -> TRef RString 
+
   |Id id -> 
     begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
     |(Some x,_)->x
@@ -187,14 +164,16 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 
   (*Should the list here be sorted? *)
   |CArr(ty, exps) -> 
-    let is_valid = List.fold_left (fun is_valid exp -> 
-      let ty_checked = typecheck_exp c exp in
-      subtype c ty_checked ty
-      ) false (List.sort compare exps)
+    typecheck_ty l c ty;
+    let all_is_sub = List.for_all(fun exp -> 
+      let ti = typecheck_exp c exp in
+      subtype c ti ty
+      ) exps
     in 
-    if is_valid then TRef(RArray ty) else type_error l "TYP_CARR not a valid type"
+    if all_is_sub then TRef(RArray ty) else type_error l "TYP_CARR not a valid type"
 
   |NewArr(ty, exp1, id, exp2) -> 
+    typecheck_ty l c ty;
     let is_int = begin match (typecheck_exp c exp1) with
     |TInt->true
     |_->type_error l "TYP_NEWARR Length is not an integer"; false
@@ -210,8 +189,8 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     end in
     if is_int && is_global && is_sub then TRef(RArray ty) else type_error l "TY_NEWARR not valid"
   
-  |Index(n1, n2) -> 
-    begin match (typecheck_exp c n1, typecheck_exp c n2) with
+  |Index(exp1, exp2) -> 
+    begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
     | (TRef(RArray t), TInt) -> t
     | (_,_) -> type_error l "TYP_INDEX not valid"
     end
@@ -266,17 +245,26 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     end
 
   |Bop(binop, exp1, exp2) ->
-    begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
-    |t1, t2 ->
-      let t1', t2', ret_ty = typ_of_binop binop in
-      if t1 == t1' && t2 == t2' then ret_ty else type_error e "TYP_BINOP the types does not match"
-    |_->type_error e "TYP_BINOP the expressions does not evaluate to types"
+    begin match binop with
+    |Eq | Neq -> 
+      begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
+      |t1, t2 -> 
+        if subtype c t1 t2 && subtype c t2 t1 then TBool else type_error l "TYP_EQ or TYP_NEQ both has to the subtypes"
+      |_ -> type_error l "TYP_EQ or TYP_NEQ not valid"
+      end
+    |_ ->
+      begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
+      |t1, t2 ->
+        let t1', t2', ret = typ_of_binop binop in
+        if t1 == t1' && t2 == t1' then ret else type_error e "TYP_BINOP the types does not match"
+        |_->type_error e "TYP_BINOP the expressions does not evaluate to types"
+      end
     end
 
   |Uop(unop, exp) ->
-    let t, ret_ty = typ_of_unop unop in
+    let t, ret = typ_of_unop unop in
     let t' = typecheck_exp c exp in
-    if t == t' then ret_ty else type_error e "TYP_UOP the types does not match"
+    if t == t' then ret else type_error e "TYP_UOP the types does not match"
 
 
 (*Variable declarations
@@ -338,7 +326,8 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     (*Check that the lhs expression is a local or that it does not have a global id*)
     begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
     (*lhs = exp*)
-    |(t, t') -> if (subtype tc t' t) then (tc, false) else type_error s "TYP_ASSN not valid"
+    |(t, t') -> 
+      if (subtype tc t' t) then (tc, false) else type_error s "TYP_ASSN not valid"
     end
 
   |Decl vdecl -> 
@@ -477,20 +466,18 @@ let rec check_dups_args (args : (Ast.ty * Ast.id) list) : bool =
   end
 
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
-  (*Add all the arguments to the local context*)
-  (*TODO: check if the fields are distinct using the function over *)
-  (* if check_dups_args f.args then failwith "there are duplicate fields in the arguments"
-  else (
-    List.map(fun arg ->
-      begin match (Tctxt.lookup_local_option (snd arg) tc) with
-      |Some x -> failwith "Arg is already in the local context"
-      |None -> Tctxt.add_local tc (snd arg) (fst arg)
-      end
-      ) f.args
-  ); *)
-  typecheck_block tc f.body f.frtyp
-  (* let c, will_ret = typecheck_stmts tc f.body f.frtyp in  *)
-  (* if will_ret then () else failwith "Will not return" *)
+  List.fold_left (fun tc arg -> 
+    Tctxt.add_local tc (snd arg) (fst arg)
+    (* begin match Tctxt.lookup_local_option (snd arg) tc with 
+    |Some x -> type_error l "TYP_FFDECLOK already in the context"
+    |None -> Tctxt.add_local tc (snd arg) (fst arg) *)
+    (* end *)
+    ) tc f.args;
+  (* typecheck_block tc f.body f.frtyp *)
+  let c, will_ret = typecheck_stmts tc f.body f.frtyp in 
+  if will_ret then () else failwith "Will not return"
+
+
 
 (* let typecheck_block (tc : Tctxt.t) (b : Ast.block) (l : 'a Ast.node) : unit =   *)
 (* creating the typchecking context ----------------------------------------- *)
@@ -528,10 +515,10 @@ let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
     |Gfdecl f -> c
     |Gtdecl t ->
       begin match (lookup_struct_option (fst t.elt) c) with
-      |Some x -> failwith "Cannot add struct if already exists"
+      |Some x -> type_error t "TYP_STDECL Cannot add struct if already exists"
       |None -> 
-        if check_dups (snd t.elt) then failwith "Cannot add struct because there are duplicate fields"
-        else Tctxt.add_struct c (fst t.elt) (snd t.elt)
+        if check_dups (snd t.elt) then type_error t "TYP_STDECL there are duplicate fields" else
+        Tctxt.add_struct c (fst t.elt) (snd t.elt)
       end
     |_-> c
     end
@@ -543,29 +530,37 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
     |Gtdecl t -> c
     |Gvdecl g -> c
     |Gfdecl f ->
-      List.fold_left(fun c arg -> 
-        begin match (Tctxt.lookup_global_option(snd arg) tc) with
-        |Some x -> failwith "Function argument is already in the context"
-        |None -> Tctxt.add_local c (snd arg) (fst arg)
-        end
-        ) c f.elt.args
+      let func = f.elt in
+      begin match (Tctxt.lookup_global_option func.fname c) with
+      | Some x -> type_error f "TYP_FFDECL The function is already in the global context"
+      | None ->
+        (*TYP_FTYP start*)
+        typecheck_ret_ty f c func.frtyp;
+        List.iter (fun arg -> typecheck_ty f c (fst arg)) func.args;
+        (*TYP_FTYP end*)
+        let args = List.fold_left (fun lst arg -> 
+          lst @ [fst arg]
+          ) [] func.args in
+        let func_ty = TRef(RFun(args, func.frtyp)) in
+        Tctxt.add_global c func.fname func_ty;
+      end
     |_ -> c
     end
     ) tc p
 
-(*TODO: is this the right way to create the global context*)
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   List.fold_left (fun c el -> 
     begin match el with
     |Gtdecl t -> c
     |Gfdecl f -> c
     |Gvdecl g ->
-      begin match g.elt with
-      |gdecl ->
-        begin match (Tctxt.lookup_global_option gdecl.name c) with
-        |Some x -> failwith "Global declaration already in the context"
-        |None -> Tctxt.add_global c gdecl.name (typecheck_exp c gdecl.init)
-        end
+      let gdecl = g.elt in
+      begin match (Tctxt.lookup_global_option gdecl.name c) with
+      |Some x -> type_error g "TYP_GGDECL Global declaration already in the context"
+      |None -> 
+        let t = typecheck_exp c gdecl.init in
+        print_endline ("GLOBAL TYPE " ^ Astlib.string_of_ty t);
+        Tctxt.add_global c gdecl.name t 
       end
     |_ -> c
     end

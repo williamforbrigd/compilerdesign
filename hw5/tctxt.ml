@@ -6,7 +6,6 @@ type fty = Ast.ty list * Ast.ret_ty
 (* typing contexts *)
 type local_ctxt = (Ast.id * Ast.ty) list
 type global_ctxt = (Ast.id * Ast.ty) list
-type fun_ctxt = (Ast.id * fty) list
 type struct_ctxt = (Ast.id * Ast.field list) list
 
 (* bundled together *)
