@@ -156,14 +156,9 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   |CStr s -> TRef RString 
 
   |Id id -> 
-    print_endline ("Local or global id: " ^ id);
     begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
-    |(Some x,_)->
-      print_endline ("The local type is: " ^ Astlib.ml_string_of_ty x);
-      x
-    |(None, Some x)->
-      print_endline ("The global type is: " ^ Astlib.ml_string_of_ty x);
-      x
+    |(Some x,_)-> x
+    |(None, Some x)-> x
     |_,_->type_error l "TYP_LOCAL or TYP_GLOBAL not valid"
     end
 
@@ -211,7 +206,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     |Some fields ->
       let all_is_sub = List.for_all2 (fun field exp ->
         let t' = typecheck_exp c (snd exp) in 
-        print_endline ("Struct variable: " ^ Astlib.ml_string_of_ty t');
         subtype c t' field.ftyp
         ) fields expsi
       in 
@@ -279,23 +273,19 @@ typecheck them and add them to the local context if they don't exist
 (*When you typechekc the vdecl should you return the type as well as the context?*)
 (*TODO: lets just return this for now*)
 let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
-  let e = snd vdecl in
-  print_endline ("The exp is : " ^ Astlib.ml_string_of_exp e);
-  (*TODO: have to only check locals!!!*)
   begin match Tctxt.lookup_local_option (fst vdecl) tc with
   |Some x -> failwith "TYP_DECL not valid. Already in the context"
   |None -> 
     let t = typecheck_exp tc (snd vdecl) in
-    print_endline ("The id is: " ^ (fst vdecl));
-    print_endline ("The type of the declated variable is : " ^ Astlib.ml_string_of_ty t);
     Tctxt.add_local tc (fst vdecl) t
   end
 
 let typecheck_vdecls (tc : Tctxt.t) (vdecls : (Ast.id * Ast.exp Ast.node) list ) : Tctxt.t =
-  List.fold_left (fun tc vdecl -> 
-    typecheck_vdecl tc vdecl 
+  List.fold_left (fun c vdecl -> 
+    (* let id, ty = typecheck_vdecl tc vdecl in *)
+    (* Tctxt.add_local c id ty *)
+    typecheck_vdecl tc vdecl
     ) tc vdecls
-
 
 (* statements --------------------------------------------------------------- *)
 
@@ -334,12 +324,31 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   match s.elt with
   |Assn(lhs, exp) -> 
     (*Check that the lhs expression is a local or that it does not have a global function id*)
-    begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
-    |(t, t') -> 
-      if (subtype tc t' t) then (tc, false) else type_error s "TYP_ASSN not valid"
+    begin match lhs.elt with
+    |Id id -> 
+      begin match Tctxt.lookup_local_option id tc with
+      |Some x -> 
+        begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
+        |(t, t') -> 
+          if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
+        end
+      |None ->
+        (*Check that the id is not a global function id *)
+        begin match Tctxt.lookup_global_option id tc with
+        |Some x -> type_error lhs "TYP_ASSN the lhs cannot be a global function id"
+        |None -> 
+          begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
+          |(t, t') -> 
+            if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
+          end
+        end
+      end
+    |Index(exp1, exp2) -> failwith "TYP_ASSN has not implemented lhs index yet"
+    |Proj(exp, id) -> failwith "TYP_ASSN has not implemented lhs projection yet"
+    |_ -> type_error lhs "TYP_ASSN the left hand side has to be a variable with an id"
     end
 
-  |Decl vdecl -> typecheck_vdecl tc vdecl, false 
+  |Decl vdecl -> typecheck_vdecl tc vdecl, false
 
   |Ret(opt) -> 
     begin match opt with
@@ -348,8 +357,6 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
       |RetVal ty -> 
         begin match typecheck_exp tc exp with
         |t' -> 
-          print_endline (Astlib.ml_string_of_ty t');
-          print_endline (Astlib.ml_string_of_ty ty);
           if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
         |_ -> type_error s "TYP_RETT not valid"
         end
@@ -416,8 +423,8 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   |_ -> type_error s "Not a valid statement"
 
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
-List.fold_left (fun (c, will_ret) stmt -> 
-    typecheck_stmt tc stmt to_ret
+  List.fold_left (fun (c, will_ret) stmt -> 
+    typecheck_stmt c stmt to_ret
     ) (tc, false) stmts
 
  let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
