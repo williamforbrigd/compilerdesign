@@ -156,6 +156,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   |CStr s -> TRef RString 
 
   |Id id -> 
+    print_endline ("the id is: " ^ id);
     begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
     |(Some x,_)-> x
     |(None, Some x)-> x
@@ -271,7 +272,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 typecheck them and add them to the local context if they don't exist
 *)
 (*When you typechekc the vdecl should you return the type as well as the context?*)
-(*TODO: lets just return this for now*)
 let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
   begin match Tctxt.lookup_local_option (fst vdecl) tc with
   |Some x -> failwith "TYP_DECL not valid. Already in the context"
@@ -282,8 +282,6 @@ let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t
 
 let typecheck_vdecls (tc : Tctxt.t) (vdecls : (Ast.id * Ast.exp Ast.node) list ) : Tctxt.t =
   List.fold_left (fun c vdecl -> 
-    (* let id, ty = typecheck_vdecl tc vdecl in *)
-    (* Tctxt.add_local c id ty *)
     typecheck_vdecl tc vdecl
     ) tc vdecls
 
@@ -326,10 +324,14 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     (*Check that the lhs expression is a local or that it does not have a global function id*)
     begin match lhs.elt with
     |Id id -> 
+      print_endline ("got here: " ^ id);
       begin match Tctxt.lookup_local_option id tc with
       |Some x -> 
+        print_endline ("got here: " ^ id);
         begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
         |(t, t') -> 
+          print_endline ("The LHS is: " ^ Astlib.ml_string_of_ty t);
+          print_endline ("The RHS is: " ^ Astlib.ml_string_of_ty t');
           if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
         end
       |None ->
@@ -409,13 +411,13 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     end
 
   |For(vdecls, exp_opt, stmt_opt, stmts) -> 
-    typecheck_vdecls tc vdecls;
+    let l2 = typecheck_vdecls tc vdecls in
     begin match (exp_opt, stmt_opt) with
     |Some exp, Some stmt ->
-      begin match (typecheck_exp tc exp, typecheck_stmt tc stmt to_ret) with
-      |(TBool, (c, will_ret)) -> 
-        typecheck_stmts tc stmts to_ret;
-        if will_ret then type_error stmt "TYP_FOR statement has to not return" else tc, false
+      begin match (typecheck_exp l2 exp, typecheck_stmt l2 stmt to_ret) with
+      |(TBool, (l3, will_ret)) -> 
+        typecheck_stmts l2 stmts to_ret;
+        if will_ret then type_error stmt "TYP_FOR statement has to not return" else l3, false
       end
     |_, Some stmt -> type_error s "TYP_FOR none or both has to be present"
     |Some exp, _ -> type_error s "TYP_FOR none or both has to be present"
@@ -423,13 +425,13 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   |_ -> type_error s "Not a valid statement"
 
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
-  List.fold_left (fun (c, will_ret) stmt -> 
-    typecheck_stmt c stmt to_ret
+  List.fold_left (fun (ln, will_ret) stmt -> 
+    typecheck_stmt ln stmt to_ret
     ) (tc, false) stmts
 
- let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : unit = 
-  let c, will_ret = typecheck_stmts tc b ret in
-  if will_ret then () else type_error (no_loc ()) "the block has to return" 
+ let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Ast.block * bool= 
+  let ln, r = typecheck_stmts tc b ret in
+  if r then b, r else type_error (no_loc ()) "the block has to return" 
 
 
 
@@ -460,6 +462,7 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
   then type_error l ("Repeated fields in " ^ id) 
   else List.iter (fun f -> typecheck_ty l tc f.ftyp) fs
 
+
 (* function declarations ---------------------------------------------------- *)
 (* typecheck a function declaration 
     - extends the local context with the types of the formal parameters to the 
@@ -475,15 +478,14 @@ let rec check_dups_args (args : (Ast.ty * Ast.id) list) : bool =
   end
 
 let typecheck_fdecl (tc : Tctxt.t) (f: Ast.fdecl) (l : 'a Ast.node) : unit =
-  List.fold_left (fun tc arg -> 
-    begin match Tctxt.lookup_local_option (snd arg) tc with 
+  let new_tc = List.fold_left (fun c arg -> 
+    begin match Tctxt.lookup_local_option (snd arg) c with 
     |Some x -> type_error l "TYP_FFDECLOK already in the context"
-    |None -> Tctxt.add_local tc (snd arg) (fst arg)
+    |None -> Tctxt.add_local c (snd arg) (fst arg)
     end
-    ) tc f.args;
-  (* typecheck_block tc f.body f.frtyp *)
-  let c, will_ret = typecheck_stmts tc f.body f.frtyp in 
-  if will_ret then () else failwith "TYP_FDECLOK the function has to return"
+    ) tc f.args in
+  let b, r = typecheck_block new_tc f.body f.frtyp in 
+  if r then () else type_error l "TYP_FDECLOK the function has to return"
 
 
 
@@ -542,18 +544,24 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
       | Some x -> type_error l "TYP_FFDECL The function is already in the global context"
       | None ->
         (*TYP_FTYP start*)
-        typecheck_ret_ty l c f.frtyp;
-        List.iter (fun arg -> typecheck_ty l c (fst arg)) f.args;
+        let check_ret = typecheck_ret_ty l c f.frtyp in
+        let check_args = List.iter (fun arg -> typecheck_ty l c (fst arg)) f.args in
         (*TYP_FTYP end*)
-        let args = List.fold_left (fun lst arg -> 
-          lst @ [fst arg]
-          ) [] f.args in
-        let func_ty = TRef(RFun(args, f.frtyp)) in
-        Tctxt.add_global c f.fname func_ty;
+        if check_ret == () && check_args == () then
+          let args = List.map(fun arg -> fst arg) f.args in
+          let func_ty = TRef(RFun(args, f.frtyp)) in
+          Tctxt.add_global c f.fname func_ty;
+        else type_error l "TYP_FTYP not valid"
       end
     |_ -> c
     end
     ) tc p
+
+  (* and typecheck_ftyp (tc:Tctxt.t) (fdecl : Ast.fdecl Ast.node) : Ast.ty = 
+    let f = fdecl.elt in
+    let check_ret = typecheck_ret_ty fdecl tc f.frtyp in
+    let check_args = List.iter (fun arg -> typecheck_ty fdecl tc (fst arg)) f.args in
+    if check_ret == () && check_args == () then Id f.fname else type_error fdecl "TYP_FTYP not valid" *)
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   List.fold_left (fun c el -> 

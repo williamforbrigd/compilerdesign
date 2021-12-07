@@ -180,8 +180,12 @@ let size_oat_ty (t : Ast.ty) = 8L
    runtime *)
 let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
   let ans_id, arr_id = gensym "array", gensym "raw_array" in
+  (* print_endline ("the ans id: " ^ ans_id); *)
+  (* print_endline ("the arr id: " ^ arr_id); *)
   let ans_ty = cmp_ty ct @@ TRef (RArray t) in
   let arr_ty = Ptr I64 in
+  (* print_endline ("The arr_ty is: " ^ Llutil.string_of_ty arr_ty); *)
+  (* print_endline ("The ans_ty is: " ^ Llutil.string_of_ty ans_ty); *)
   ans_ty, Id ans_id, lift
     [ arr_id, Call(arr_ty, Gid "oat_alloc_array", [I64, size])
     ; ans_id, Bitcast(arr_ty, Id arr_id, ans_ty) ]
@@ -196,7 +200,16 @@ let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
    - make sure to calculate the correct amount of space to allocate!
 *)
 let oat_alloc_struct ct (id:Ast.id) : Ll.ty * operand * stream =
-  failwith "TODO: oat_alloc_struct"
+  let ans_id, struct_id = gensym "struct", gensym "raw_struct" in
+  let ans_ty = cmp_ty ct @@ TRef(RStruct id) in
+  let struct_ty = Ptr I64 in
+  print_endline ("the struct type is: " ^ (Llutil.string_of_ty struct_ty));
+  let fields = TypeCtxt.lookup id ct in
+  let size = Ll.Const(Int64.of_int @@ List.length fields) in
+  ans_ty, Id ans_id, lift
+    [struct_id, Call(struct_ty, Gid "oat_malloc", [I64, size])
+    ; ans_id, Bitcast(struct_ty, Id struct_id, ans_ty)
+    ] 
 
 
 let str_arr_ty s = Array(1 + String.length s, I8)
@@ -287,6 +300,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     cmp_call tc c f es 
 
   | Ast.CArr (elt_ty, cs)  ->
+    print_endline ("the elt_ty is: " ^ Astlib.ml_string_of_ty elt_ty);
     let size_op = Ll.Const (Int64.of_int @@ List.length cs) in
     let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
     let ll_elt_ty = cmp_ty tc elt_ty in
@@ -298,6 +312,8 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
         ; "",  Store(ll_elt_ty, elt_op, Id ind) ] 
     in
     let ind_code = List.(fold_left add_elt [] @@ mapi (fun i e -> i, e) cs) in
+    print_endline (Llutil.string_of_ty arr_ty);
+    print_endline (Llutil.string_of_operand arr_op);
     arr_ty, arr_op, alloc_code >@ ind_code
 
   (* ARRAY TASK: Modify the compilation of the NewArr construct to implement the 
@@ -322,7 +338,8 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
        - store the resulting value into the structure
    *)
   | Ast.CStruct (id, l) ->
-    failwith "TODO: Ast.CStruct"
+    let struct_ty, struct_op, alloc_code = oat_alloc_struct tc id in
+    struct_ty, struct_op, alloc_code
 
   | Ast.Proj (e, id) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
