@@ -300,7 +300,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     cmp_call tc c f es 
 
   | Ast.CArr (elt_ty, cs)  ->
-    print_endline ("the elt_ty is: " ^ Astlib.ml_string_of_ty elt_ty);
+    (* print_endline ("the elt_ty is: " ^ Astlib.ml_string_of_ty elt_ty); *)
     let size_op = Ll.Const (Int64.of_int @@ List.length cs) in
     let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
     let ll_elt_ty = cmp_ty tc elt_ty in
@@ -312,8 +312,8 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
         ; "",  Store(ll_elt_ty, elt_op, Id ind) ] 
     in
     let ind_code = List.(fold_left add_elt [] @@ mapi (fun i e -> i, e) cs) in
-    print_endline (Llutil.string_of_ty arr_ty);
-    print_endline (Llutil.string_of_operand arr_op);
+    (* print_endline (Llutil.string_of_ty arr_ty); *)
+    (* print_endline (Llutil.string_of_operand arr_op); *)
     arr_ty, arr_op, alloc_code >@ ind_code
 
   (* ARRAY TASK: Modify the compilation of the NewArr construct to implement the 

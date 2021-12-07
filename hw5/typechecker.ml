@@ -62,7 +62,17 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     |(RArray ty1, RArray ty2)->true
     |(RStruct id1, RStruct id2) -> 
       begin match (Tctxt.lookup_struct_option id1 c, Tctxt.lookup_struct_option id2 c) with
-      | Some lst1, Some lst2 -> true
+      | Some lst1, Some lst2 -> 
+        let rec loop lst1 lst2 =
+          begin match lst1,lst2 with
+          |[],[] -> true
+          |[],_ -> false
+          |_,[]-> true
+          |h1::tl1,h2::tl2 -> 
+            if String.equal h1.fieldName h2.fieldName && h1.ftyp == h2.ftyp then loop tl1 tl2 else false 
+          |_,_ -> false
+          end 
+        in loop lst1 lst2 
       | _,_ -> false
       end
     |(RFun(lst1, ret_ty1), RFun(lst2, ret_ty2))->
@@ -215,15 +225,16 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     end
   
   |Proj(exp, id) ->
+    print_endline ("got here: " ^ id);
     begin match typecheck_exp c exp with
     |TRef(RStruct struct_id) ->
+      print_endline ("got here2: " ^ id);
       begin match Tctxt.lookup_struct_option struct_id c with
       |Some fields ->
-        let does_exist = List.exists (fun field -> 
-          id = field.fieldName
-          ) fields
-        in
-        if does_exist then Tctxt.lookup id c else type_error e "TYP_FIELD cannot find the id in the struct"
+        begin match Tctxt.lookup_field_option struct_id id c with
+        |Some ty -> ty
+        |None -> type_error e "TYP_FIELD cannot find the field"
+        end
       |None -> type_error e "TYP_FIELD cannot find the struct"
       end
     |_ -> type_error e "TYP_FIELD the exp has to be a struct"
@@ -273,6 +284,7 @@ typecheck them and add them to the local context if they don't exist
 *)
 (*When you typechekc the vdecl should you return the type as well as the context?*)
 let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
+  print_endline ("the vdecl is: " ^ Astlib.ml_string_of_exp (snd vdecl));
   begin match Tctxt.lookup_local_option (fst vdecl) tc with
   |Some x -> failwith "TYP_DECL not valid. Already in the context"
   |None -> 
@@ -324,15 +336,18 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     (*Check that the lhs expression is a local or that it does not have a global function id*)
     begin match lhs.elt with
     |Id id -> 
-      print_endline ("got here: " ^ id);
       begin match Tctxt.lookup_local_option id tc with
       |Some x -> 
-        print_endline ("got here: " ^ id);
         begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
         |(t, t') -> 
-          print_endline ("The LHS is: " ^ Astlib.ml_string_of_ty t);
-          print_endline ("The RHS is: " ^ Astlib.ml_string_of_ty t');
-          if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
+          (* begin match (t, t') with
+          |TRef(RStruct id1), TRef(RStruct id2) ->
+            if id1 == id2 then Tctxt.add_local tc id t', false else type_error s "TYP_ASSN cannot assign two different structs"
+          |_ ->
+            if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
+          end *)
+          if (subtype tc t' t) then (Tctxt.add_local tc id t', false) 
+          else type_error s "TYP_ASSN not valid because not a subtype"
         end
       |None ->
         (*Check that the id is not a global function id *)
@@ -359,6 +374,14 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
       |RetVal ty -> 
         begin match typecheck_exp tc exp with
         |t' -> 
+          print_endline ("The actyal return type is: " ^Astlib.ml_string_of_ty ty);
+          print_endline ("got return type is: " ^Astlib.ml_string_of_ty t');
+          (* begin match ty, t' with
+          |TRef(RStruct id1), TRef(RStruct id2) ->
+            if id1 == id2 && subtype tc t' ty then tc, true else type_error s "TYP_RETT different id on struct return value"
+          |_ -> 
+            if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
+          end *)
           if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
         |_ -> type_error s "TYP_RETT not valid"
         end
@@ -425,9 +448,14 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   |_ -> type_error s "Not a valid statement"
 
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
-  List.fold_left (fun (ln, will_ret) stmt -> 
-    typecheck_stmt ln stmt to_ret
-    ) (tc, false) stmts
+  (**TODO: fix this*)
+  let ln, will_ret, _ = List.fold_left (fun (ln, will_ret, i) stmt -> 
+    let l, r = typecheck_stmt tc stmt to_ret in
+    if r && i != List.length stmts - 1 then type_error stmt "TYP_STMTS the last statement has to return"
+    else (l, r, i+1)
+    (* typecheck_stmt ln stmt to_ret *)
+    ) (tc, false, 0) stmts
+  in ln, will_ret
 
  let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Ast.block * bool= 
   let ln, r = typecheck_stmts tc b ret in
