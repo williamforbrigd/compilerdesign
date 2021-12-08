@@ -294,11 +294,10 @@ typecheck them and add them to the local context if they don't exist
 *)
 (*When you typechekc the vdecl should you return the type as well as the context?*)
 let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
+  let t = typecheck_exp tc (snd vdecl) in
   begin match Tctxt.lookup_local_option (fst vdecl) tc with
   |Some x -> type_error (snd vdecl) "TYP_DECL not valid. Already in the context"
-  |None -> 
-    let t = typecheck_exp tc (snd vdecl) in
-    Tctxt.add_local tc (fst vdecl) t
+  |None -> Tctxt.add_local tc (fst vdecl) t
   end
 
 let typecheck_vdecls (tc : Tctxt.t) (vdecls : (Ast.id * Ast.exp Ast.node) list ) : Tctxt.t =
@@ -341,78 +340,7 @@ let typecheck_vdecls (tc : Tctxt.t) (vdecls : (Ast.id * Ast.exp Ast.node) list )
 *)
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
   match s.elt with
-  |Assn(lhs, exp) -> 
-    (*Check that the lhs expression is a local or that it does not have a global function id*)
-    begin match lhs.elt with
-    |Id id -> 
-      begin match Tctxt.lookup_local_option id tc with
-      |Some x -> 
-        begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
-        |(t, t') -> 
-          print_endline ("the t1: " ^ Astlib.ml_string_of_ty t);
-          print_endline ("the t2: " ^ Astlib.ml_string_of_ty t');
-          if (subtype tc t' t) then (
-            print_endline ("is a sub");
-            (Tctxt.add_local tc id t', false) 
-          )
-          else type_error s "TYP_ASSN not valid because not a subtype"
-        end
-      |None ->
-        (*Check that the id is not a global function id *)
-        begin match Tctxt.lookup_global_option id tc with
-        |Some x -> type_error lhs "TYP_ASSN the lhs cannot be a global function id"
-        |None -> 
-          begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
-          |(t, t') -> 
-            if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
-          end
-        end
-      end
-    |Index(exp1, exp2) -> 
-      begin match exp1.elt,exp2.elt with
-      |Id id, CInt c -> 
-        begin match Tctxt.lookup_local_option id tc with
-        |Some(TRef(RArray t)) -> 
-          begin match typecheck_exp tc exp with
-          |t' -> 
-            if (subtype tc t' t) then 
-              (*is this the right way to add the id in the contex?*)
-              Tctxt.add_local tc (id^"[" ^ Int64.to_string c ^ "]") (typecheck_exp tc exp), false
-            else
-              type_error s "TYP_ASSN not a subtype"
-          end
-        |None -> type_error s "TYP_ASSN the arr has to exist"
-        end
-      |_ -> type_error s "TYP_ASSN lhs index not valid"
-      end
-    |Proj(lhs_exp, f_name) -> 
-      begin match lhs_exp.elt with
-      |Id struct_id -> 
-        begin match Tctxt.lookup_struct_option struct_id tc with
-        |Some fields -> 
-          begin match Tctxt.lookup_field_option struct_id f_name tc with
-          |Some t ->
-            begin match typecheck_exp tc exp with
-            |t' -> 
-              if subtype tc t' t then
-                let fields = Tctxt.lookup_struct struct_id tc in 
-                let new_fields = List.map(fun field -> 
-                  if String.equal field.fieldName f_name then
-                    {fieldName = f_name; ftyp = t'}
-                  else failwith "Could not find field"
-                  ) fields in
-                Tctxt.add_struct tc struct_id new_fields, false
-              else type_error s "TYP_ASSN lhs proj not a subtype"
-            |_ -> type_error s "TYP_ASSN lhs proj" 
-            end
-          |None -> type_error s "TYP_ASSN the struct field has to exist for it to be assigned"
-          end
-        |None -> type_error s "TYP_ASSN the struct has to exist"
-        end
-      end
-      (* failwith "TYP_ASSN has not implemented lhs projection yet" *)
-    |_ -> type_error lhs "TYP_ASSN the left hand side has to be a variable with an id"
-    end
+  |Assn(lhs, exp) -> typecheck_assn tc lhs exp 
 
   |Decl vdecl -> typecheck_vdecl tc vdecl, false
 
@@ -484,8 +412,8 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     let t = typecheck_exp tc exp in
     begin match typecheck_exp tc exp with
     |TBool ->
-      let _, r = typecheck_block tc stmts to_ret in
-      if r then tc, false else type_error s "TYP_WHILE the block inside the while loop does not return"
+      let _, r = typecheck_block tc stmts to_ret in tc, false
+      (* if r then tc, false else type_error s "TYP_WHILE the block inside the while loop does not return" *)
     |_ -> type_error s "TYP_WHILE the expression is not a boolean"
     end
 
@@ -505,6 +433,73 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     print_endline ("the statement that is not: " ^ Astlib.ml_string_of_stmt s);
     type_error s "Not a valid statement"
 
+and typecheck_assn (tc : Tctxt.t) (lhs : Ast.exp Ast.node) (exp : Ast.exp Ast.node) : Tctxt.t * bool = 
+  (*Check that the lhs expression is a local or that it does not have a global function id*)
+  begin match lhs.elt with
+  |Id id -> 
+    begin match Tctxt.lookup_local_option id tc with
+    |Some x -> 
+      begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
+      |(t, t') -> 
+        print_endline ("the t1: " ^ Astlib.ml_string_of_ty t);
+        print_endline ("the t2: " ^ Astlib.ml_string_of_ty t');
+        if (subtype tc t' t) then (
+          print_endline ("is a sub");
+          (Tctxt.add_local tc id t', false) 
+        )
+        else type_error lhs "TYP_ASSN not valid because not a subtype"
+      end
+    |None ->
+      (*Check that the id is not a global function id *)
+      begin match Tctxt.lookup_global_option id tc with
+      |Some x -> type_error lhs "TYP_ASSN the lhs cannot be a global function id"
+      |None -> 
+        begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
+        |(t, t') -> 
+          if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error lhs "TYP_ASSN not valid"
+        end
+      end
+    end
+
+  |Index(exp1, exp2) -> 
+    begin match exp1.elt,exp2.elt with
+    |Id id, CInt c -> 
+      begin match Tctxt.lookup_local_option id tc with
+      |Some(TRef(RArray t)) -> 
+        begin match typecheck_exp tc exp with
+        |t' -> 
+          if (subtype tc t' t) then 
+            (*is this the right way to add the id in the contex?*)
+            Tctxt.add_local tc (id^"[" ^ Int64.to_string c ^ "]") (typecheck_exp tc exp), false
+          else
+            type_error lhs "TYP_ASSN not a subtype"
+        end
+      |None -> type_error lhs "TYP_ASSN the arr has to exist"
+      end
+    |_ -> type_error lhs "TYP_ASSN lhs index not valid"
+    end
+
+  |Proj(lhs_exp, f_name) -> 
+    print_endline ("the lhs: " ^ Astlib.ml_string_of_exp lhs_exp);
+    print_endline ("the fname: " ^ f_name);
+    begin match lhs_exp.elt with
+    |Id id -> 
+      begin match Tctxt.lookup_local_option id tc with
+      |Some ty -> 
+        begin match ty with
+        |TRef(RStruct st_name) | TNullRef(RStruct st_name) ->
+          print_endline ("the st_name: " ^ st_name);
+          Tctxt.add_local tc (id ^ "." ^ f_name) (typecheck_exp tc exp), false 
+        end
+      |None -> type_error lhs "TYP_ASSN the struct variable has to exist"
+      end
+    |Proj(exp1, exp2) -> failwith "nested index projection not implemented"
+    |_ -> type_error lhs "TYP_ASSN lhs has to be an id"
+    end
+
+  |_ -> type_error lhs "TYP_ASSN the left hand side has to be a variable with an id"
+  end
+
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
   let ln, will_ret, _ = List.fold_left (fun (ln, will_ret, i) stmt -> 
     (* print_endline (Astlib.ml_string_of_stmt stmt); *)
@@ -515,11 +510,7 @@ and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret
   in ln, will_ret
 
  and typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Ast.block * bool= 
-  let ln, r = typecheck_stmts tc b ret in
-  b,r
-  (* if r then b, r else type_error (no_loc ()) "the block has to return"  *)
-
-
+  let ln, r = typecheck_stmts tc b ret in b,r
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
