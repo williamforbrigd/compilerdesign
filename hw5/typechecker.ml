@@ -184,20 +184,20 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 
   |NewArr(ty, exp1, id, exp2) -> 
     typecheck_ty l c ty;
-    let is_int = begin match (typecheck_exp c exp1) with
-    |TInt->true
-    |_->type_error l "TYP_NEWARR Length is not an integer"; false
-    end in
-    let is_global = begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
-    |(Some x, _) -> type_error l "TYP_NEWARR the id cannot be a local"; false 
-    |(None, Some x)-> true
-    |(_,_)-> type_error l "TYP_NEWARR the id is not global"; false
-    end in
-    let is_sub = begin match (typecheck_exp c exp2) with
-    |t'-> subtype c t' ty
-    |_->type_error l "TYP_NEWARR is not subtype"
-    end in
-    if is_int && is_global && is_sub then TRef(RArray ty) else type_error l "TY_NEWARR not valid"
+    begin match typecheck_exp c exp1 with
+    |TInt ->
+      begin match Tctxt.lookup_local_option id c with
+      |Some x -> type_error l "TYP_NEWARR the id cannot exists locally already"
+      |None -> 
+        let new_c = Tctxt.add_local c id ty in
+        begin match typecheck_exp new_c exp2 with
+        |t' -> 
+          if(subtype new_c t' ty) then TRef(RArray ty) else type_error l "TYP_NEWARR type is not a subtype"
+        |_-> type_error l "TYP_NEWARR exp2"
+        end
+      end
+    |_ -> type_error l "TYP_NEWARR the first expression has to evaluate to an int"
+    end
   
   |Index(exp1, exp2) -> 
     begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
