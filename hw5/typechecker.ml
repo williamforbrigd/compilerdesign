@@ -166,7 +166,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   |CStr s -> TRef RString 
 
   |Id id -> 
-    print_endline ("the id is: " ^ id);
     begin match (Tctxt.lookup_local_option id c, Tctxt.lookup_global_option id c) with
     |(Some x,_)-> x
     |(None, Some x)-> x
@@ -225,10 +224,8 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     end
   
   |Proj(exp, id) ->
-    print_endline ("got here: " ^ id);
     begin match typecheck_exp c exp with
     |TRef(RStruct struct_id) ->
-      print_endline ("got here2: " ^ id);
       begin match Tctxt.lookup_struct_option struct_id c with
       |Some fields ->
         begin match Tctxt.lookup_field_option struct_id id c with
@@ -264,11 +261,21 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
         if subtype c t1 t2 && subtype c t2 t1 then TBool else type_error l "TYP_EQ or TYP_NEQ both has to the subtypes"
       |_ -> type_error l "TYP_EQ or TYP_NEQ not valid"
       end
+    (* | Lt | Lte | Gt | Gte -> 
+      begin match exp1.elt,exp2.elt with
+      |CInt c1, CInt c2 -> type_error e "TYP_CMPOPS cannot compare constants"
+      |_ -> 
+        begin match typecheck_exp c exp1, typecheck_exp c exp2 with
+        |t1,t2 ->
+          let t1', t2', ret = typ_of_binop binop in
+          if t1 == t1' && t2 == t2' then ret else type_error e "TYPE_BINOP the types does not match"
+        end
+      end *)
     |_ ->
       begin match (typecheck_exp c exp1, typecheck_exp c exp2) with
       |t1, t2 ->
         let t1', t2', ret = typ_of_binop binop in
-        if t1 == t1' && t2 == t1' then ret else type_error e "TYP_BINOP the types does not match"
+        if t1 == t1' && t2 == t2' then ret else type_error e "TYP_BINOP the types does not match"
         |_->type_error e "TYP_BINOP the expressions does not evaluate to types"
       end
     end
@@ -284,7 +291,6 @@ typecheck them and add them to the local context if they don't exist
 *)
 (*When you typechekc the vdecl should you return the type as well as the context?*)
 let typecheck_vdecl (tc : Tctxt.t) (vdecl : Ast.id * Ast.exp Ast.node) : Tctxt.t = 
-  print_endline ("the vdecl is: " ^ Astlib.ml_string_of_exp (snd vdecl));
   begin match Tctxt.lookup_local_option (fst vdecl) tc with
   |Some x -> failwith "TYP_DECL not valid. Already in the context"
   |None -> 
@@ -340,12 +346,6 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
       |Some x -> 
         begin match (typecheck_exp tc lhs, typecheck_exp tc exp) with
         |(t, t') -> 
-          (* begin match (t, t') with
-          |TRef(RStruct id1), TRef(RStruct id2) ->
-            if id1 == id2 then Tctxt.add_local tc id t', false else type_error s "TYP_ASSN cannot assign two different structs"
-          |_ ->
-            if (subtype tc t' t) then (Tctxt.add_local tc id t', false) else type_error s "TYP_ASSN not valid"
-          end *)
           if (subtype tc t' t) then (Tctxt.add_local tc id t', false) 
           else type_error s "TYP_ASSN not valid because not a subtype"
         end
@@ -374,14 +374,6 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
       |RetVal ty -> 
         begin match typecheck_exp tc exp with
         |t' -> 
-          print_endline ("The actyal return type is: " ^Astlib.ml_string_of_ty ty);
-          print_endline ("got return type is: " ^Astlib.ml_string_of_ty t');
-          (* begin match ty, t' with
-          |TRef(RStruct id1), TRef(RStruct id2) ->
-            if id1 == id2 && subtype tc t' ty then tc, true else type_error s "TYP_RETT different id on struct return value"
-          |_ -> 
-            if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
-          end *)
           if subtype tc t' ty then tc, true else type_error s "TYP_RETT not a subtype"
         |_ -> type_error s "TYP_RETT not valid"
         end
@@ -427,9 +419,11 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
     end
 
   |While(exp, stmts) -> 
+    let t = typecheck_exp tc exp in
     begin match typecheck_exp tc exp with
     |TBool ->
-      typecheck_stmts tc stmts to_ret
+      let _, r = typecheck_block tc stmts to_ret in
+      if r then tc, false else type_error s "TYP_WHILE the block inside the while loop does not return"
     |_ -> type_error s "TYP_WHILE the expression is not a boolean"
     end
 
@@ -448,16 +442,14 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   |_ -> type_error s "Not a valid statement"
 
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
-  (**TODO: fix this*)
   let ln, will_ret, _ = List.fold_left (fun (ln, will_ret, i) stmt -> 
-    let l, r = typecheck_stmt tc stmt to_ret in
+    let l, r = typecheck_stmt ln stmt to_ret in
     if r && i != List.length stmts - 1 then type_error stmt "TYP_STMTS the last statement has to return"
     else (l, r, i+1)
-    (* typecheck_stmt ln stmt to_ret *)
     ) (tc, false, 0) stmts
   in ln, will_ret
 
- let typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Ast.block * bool= 
+ and typecheck_block (tc : Tctxt.t) (b : Ast.block) (ret : ret_ty) : Ast.block * bool= 
   let ln, r = typecheck_stmts tc b ret in
   if r then b, r else type_error (no_loc ()) "the block has to return" 
 
