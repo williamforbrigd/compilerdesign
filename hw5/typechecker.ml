@@ -183,10 +183,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     if all_is_sub then TRef(RArray ty) else type_error l "TYP_CARR not a valid type"
 
   |NewArr(ty, exp1, id, exp2) -> 
-    (* print_endline ("THE type id: " ^ Astlib.ml_string_of_ty ty);
-    print_endline ("the first exp: " ^ Astlib.ml_string_of_exp exp1);
-    print_endline ("the id is: " ^ id);
-    print_endline ("the second exp: " ^ Astlib.ml_string_of_exp exp2); *)
     typecheck_ty l c ty;
     begin match typecheck_exp c exp1 with
     |TInt ->
@@ -206,9 +202,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   |Index(exp1, exp2) -> typecheck_index c exp1 exp2
   
   |Length exp -> 
-      (* print_endline ("the length: " ^ Astlib.ml_string_of_exp exp); *)
-      let t = typecheck_exp c exp in
-      (* print_endline ("adsf: " ^ Astlib.ml_string_of_ty t); *)
       begin match (typecheck_exp c exp) with
       | TRef(RArray t) | TNullRef(RArray t) -> TInt
       | _ -> type_error l "TYP_LENGTH not valid"
@@ -426,14 +419,12 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
       begin match (typecheck_exp l2 exp, typecheck_stmt l2 stmt to_ret) with
       |(TBool, (l3, will_ret)) -> 
         typecheck_stmts l2 stmts to_ret;
-        if will_ret then type_error stmt "TYP_FOR statement has to not return" else l3, false
+        if will_ret then type_error stmt "TYP_FOR statement has to not return" else tc, false
       end
     |_, Some stmt -> type_error s "TYP_FOR none or both has to be present"
     |Some exp, _ -> type_error s "TYP_FOR none or both has to be present"
     end
-  |_ -> 
-    (* print_endline ("the statement that is not: " ^ Astlib.ml_string_of_stmt s); *)
-    type_error s "Not a valid statement"
+  |_ -> type_error s "Not a valid statement"
 
 and typecheck_assn (tc : Tctxt.t) (lhs : Ast.exp Ast.node) (rhs : Ast.exp Ast.node) : Tctxt.t * bool = 
   begin match lhs.elt with
@@ -459,29 +450,22 @@ and typecheck_assn (tc : Tctxt.t) (lhs : Ast.exp Ast.node) (rhs : Ast.exp Ast.no
     end
 
   |Index(lhs_exp, i_exp)->
-    let t = typecheck_index tc lhs_exp i_exp in
-    begin match t, typecheck_exp tc rhs with
-    |TInt, t' -> 
+    begin match typecheck_index tc lhs_exp i_exp, typecheck_exp tc rhs with
+    |t, t' -> 
       if subtype tc t' t then tc, false else type_error lhs_exp "TYP_ASSN index not subtype"
     |_,_ -> type_error lhs_exp "TYP_ASSN lhs not index"
     end
 
   |Proj(lhs_exp, f_name) -> 
-    print_endline ("the lhs_exp: "^ Astlib.ml_string_of_exp lhs_exp);
     begin match typecheck_proj tc lhs_exp f_name, typecheck_exp tc rhs with
     |t, t' -> if subtype tc t' t then tc, false else type_error lhs_exp "TYP_ASSN index not subtype"
     end
-    (* let t = typecheck_proj tc lhs_exp f_name in
-    print_endline ("the type proj: " ^ Astlib.ml_string_of_ty t);
-    tc, false *)
-    (* Tctxt.add_local tc f_name t, false *)
 
   |_ -> type_error lhs "TYP_ASSN the left hand side has to be a variable with an id"
   end
 
 and typecheck_stmts (tc : Tctxt.t) (stmts: Ast.stmt Ast.node list) (to_ret : ret_ty) : Tctxt.t * bool = 
   let ln, will_ret, _ = List.fold_left (fun (ln, will_ret, i) stmt -> 
-    (* print_endline (Astlib.ml_string_of_stmt stmt); *)
     let l, r = typecheck_stmt ln stmt to_ret in
     if r && i != List.length stmts - 1 then type_error stmt "TYP_STMTS the last statement to not return"
     else (l, r, i+1)
