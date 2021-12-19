@@ -12,6 +12,21 @@ module SymPtr =
 
     let compare : t -> t -> int = Pervasives.compare
 
+    let join (t1 : t) (t2 : t) : t =
+      match t1,t2 with
+      |MayAlias, MayAlias -> MayAlias
+      |Unique, Unique -> Unique
+      |UndefAlias, UndefAlias -> UndefAlias
+      
+      |MayAlias, Unique -> Unique 
+      |MayAlias, UndefAlias-> UndefAlias 
+
+      |Unique, MayAlias-> Unique 
+      |Unique, UndefAlias -> Unique 
+
+      |UndefAlias, MayAlias -> UndefAlias 
+      |UndefAlias,Unique-> Unique 
+    
     let to_string = function
       | MayAlias -> "MayAlias"
       | Unique -> "Unique"
@@ -33,9 +48,34 @@ type fact = SymPtr.t UidM.t
    - Other instructions do not define pointers
 
  *)
+let fact_to_string : fact -> string =
+      UidM.to_string (fun _ v -> SymPtr.to_string v)
+
+let f1 (a:'a) : 'a = SymPtr.Unique
+let f2 (a:'a) : 'a = SymPtr.UndefAlias
+let f3 (a:'a) : 'a = SymPtr.MayAlias
+
 let insn_flow ((u,i):uid * insn) (d:fact) : fact =
-  print_endline ("uid and ins: " ^ u ^ " " ^ Llutil.string_of_insn i);
-  failwith "Alias.insn_flow unimplemented"
+  (* print_endline ("uid and ins: " ^ u ^ " " ^ Llutil.string_of_insn i); *)
+  print_endline (u^ ": is already in the flow: " ^ string_of_bool (UidM.mem u d));
+  match i with
+  |Alloca ty -> UidM.update_or SymPtr.Unique f1 u d
+  
+  |Bitcast(ty1, op, ty2) -> UidM.update_or SymPtr.MayAlias f3 u d
+    (* begin match op with
+    |Id uid -> 
+      UidM.update_or SymPtr.MayAlias f3 uid d;
+      UidM.update_or SymPtr.MayAlias f3 u d
+    |_ -> UidM.update_or SymPtr.MayAlias f3 u d
+    end *)
+  
+  (* |Load(ty, op) -> UidM.update_or SymPtr.MayAlias f3 u d *)
+
+  (* |Call(ty, op, lst) -> UidM.update_or SymPtr.MayAlias f3 u d *)
+
+  (* |Gep(ty, op, ops) -> UidM.update_or SymPtr.MayAlias f3 u d *)
+
+  | _ -> UidM.update_or SymPtr.UndefAlias f2 u d
 
 
 (* The flow function across terminators is trivial: they never change alias info *)
@@ -69,9 +109,17 @@ module Fact =
        It may be useful to define a helper function that knows how to take the
        join of two SymPtr.t facts.
     *)
+
     let combine (ds:fact list) : fact =
-      List.fold_left (fun init elt -> init ^ to_string elt) "" ds |> print_endline;
-      failwith "Alias.Fact.combine not implemented"
+      ds |> List.fold_left (fun acc elt -> 
+        UidM.merge (fun k x0 y0 ->
+          match x0, y0 with
+          | Some x, Some y -> Some (SymPtr.join x y)
+          | Some x, None -> Some x
+          | None, Some y -> Some y
+          ) acc elt 
+        ) UidM.empty
+
   end
 
 (* instantiate the general framework ---------------------------------------- *)
