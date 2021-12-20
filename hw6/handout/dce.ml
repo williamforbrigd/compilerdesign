@@ -38,14 +38,14 @@ let dce_block (lb:uid -> Liveness.Fact.t)
         let is_live = UidS.mem uid s in
         let aliast = UidM.find_or Alias.SymPtr.UndefAlias m uid in
         begin match aliast with
-        |Alias.SymPtr.MayAlias -> not is_live
+        |Alias.SymPtr.MayAlias -> not is_live 
         |_ -> is_live
         end
       |_ -> false
       end
     | _ ->
       let s = lb u in
-      print_endline ("the uid is: " ^ u ^ " and the set: " ^ UidS.to_string s );
+      (* print_endline ("the uid is: " ^ u ^ " and the set: " ^ UidS.to_string s ); *)
       UidS.mem u s
     end
     ) b.insns

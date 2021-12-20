@@ -27,6 +27,12 @@ module SymConst =
    to integer constants *)
 type fact = SymConst.t UidM.t
 
+let fact_to_string : fact -> string =
+  UidM.to_string (fun _ v -> SymConst.to_string v)
+
+let f1 (a:'a) : 'a = SymConst.NonConst
+(* let f2 (a:'a) : 'a =  *)
+let f3 (a:'a) : 'a = SymConst.UndefConst
 
 
 (* flow function across Ll instructions ------------------------------------- *)
@@ -36,8 +42,57 @@ type fact = SymConst.t UidM.t
    - Uid of stores and void calls are UndefConst-out
    - Uid of all other instructions are NonConst-out
  *)
+
+(* let get_value bop c1 c2 = 
+  begin match bop with
+  | Add -> Int64.add c1 c2
+  | Sub -> Int64.sub c1 c2
+  | Mul -> Int64.mul c1 c2
+  |_ -> UidM.empty
+  end *)
+
 let insn_flow (u,i:uid * insn) (d:fact) : fact =
-  failwith "Constprop.insn_flow unimplemented"
+  let t1 = SymConst.NonConst in
+  let t2 x = SymConst.Const x in
+  let t3 = SymConst.UndefConst in
+  begin match i with
+  
+  (**Binop if one if the operands is a UndefConst *)
+  |Binop(bop, ty, op1, op2) -> 
+    begin match op1, op2 with
+    |Id uid1, Id uid2 -> 
+      let find1 = UidM.find_or t1 d uid1 in
+      let find2 = UidM.find_or t1 d uid2 in
+      begin match find1,find2 with 
+      |SymConst.UndefConst, SymConst.UndefConst-> UidM.update_or t1 f3 u d
+      |_, SymConst.UndefConst-> UidM.update_or t1 f3 u d
+      |SymConst.UndefConst, _ -> UidM.update_or t1 f3 u d
+      |_,_ -> UidM.update_or t1 f1 u d
+      end
+    |Id uid, _ -> 
+      let find = UidM.find_or t1 d uid in
+      begin match find with
+      |SymConst.UndefConst-> UidM.update_or t3 f3 u d
+      | _ -> UidM.update_or t1 f1 u d
+      end
+    | _, Id uid -> 
+      let find = UidM.find_or t1 d uid in
+      begin match find with
+      |SymConst.UndefConst-> UidM.update_or t3 f3 u d
+      | _ -> UidM.update_or t1 f1 u d
+      end
+    | _,_ -> UidM.update_or t1 f1 u d
+    end
+  
+  |Store(ty, op1, op2) -> UidM.update_or t1 f3 u d 
+  |Call(ty, op, lst) -> 
+    begin match ty with
+    |Void -> UidM.update_or t1 f3 u d
+    |_ -> UidM.update_or t1 f1 u d 
+    end
+
+  | _ -> UidM.update_or t1 f1 u d
+  end
 
 (* The flow function across terminators is trivial: they never change const info *)
 let terminator_flow (t:terminator) (d:fact) : fact = d
@@ -63,7 +118,15 @@ module Fact =
     (* The constprop analysis should take the meet over predecessors to compute the
        flow into a node. You may find the UidM.merge function useful *)
     let combine (ds:fact list) : fact = 
-      failwith "Constprop.Fact.combine unimplemented"
+      ds |> List.fold_left (fun acc elt -> 
+        UidM.merge (fun key x0 y0 -> 
+          begin match x0, y0 with
+          |Some x, Some y -> Some x
+          |Some x, None-> Some x
+          |None, Some y -> Some y
+          end
+          ) acc elt
+        ) UidM.empty
   end
 
 (* instantiate the general framework ---------------------------------------- *)
@@ -96,7 +159,8 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
   let cp_block (l:Ll.lbl) (cfg:Cfg.t) : Cfg.t =
     let b = Cfg.block cfg l in
     let cb = Graph.uid_out cg l in
-    failwith "Constprop.cp_block unimplemented"
+    (* failwith "Constprop.cp_block unimplemented" *)
+    cfg
   in
 
   LblS.fold cp_block (Cfg.nodes cfg) cfg
