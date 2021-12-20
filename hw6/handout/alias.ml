@@ -55,25 +55,35 @@ let f1 (a:'a) : 'a = SymPtr.Unique
 let f2 (a:'a) : 'a = SymPtr.UndefAlias
 let f3 (a:'a) : 'a = SymPtr.MayAlias
 
+let ins_flow_union op u d = 
+  begin match op with
+  | Id uid ->
+    let fact1 = UidM.update_or SymPtr.MayAlias f3 uid d in
+    let fact2 = UidM.update_or SymPtr.MayAlias f3 u d in
+    UidM.union (fun key a1 a2 -> Some(SymPtr.join a1 a1)) fact1 fact2
+  |  _ -> UidM.update_or SymPtr.MayAlias f3 u d
+  end
+
+
 let insn_flow ((u,i):uid * insn) (d:fact) : fact =
-  (* print_endline ("uid and ins: " ^ u ^ " " ^ Llutil.string_of_insn i); *)
-  print_endline (u^ ": is already in the flow: " ^ string_of_bool (UidM.mem u d));
   match i with
   |Alloca ty -> UidM.update_or SymPtr.Unique f1 u d
-  
-  |Bitcast(ty1, op, ty2) -> UidM.update_or SymPtr.MayAlias f3 u d
-    (* begin match op with
-    |Id uid -> 
-      UidM.update_or SymPtr.MayAlias f3 uid d;
+  |Bitcast(ty1, op, ty2) -> ins_flow_union op u d
+  |Call(ty, op, lst) -> ins_flow_union op u d
+  |Gep(ty, op, ops) -> ins_flow_union op u d
+
+  (* |Load(ty, op) -> 
+    begin match ty with
+    |Ptr(ty1) -> 
       UidM.update_or SymPtr.MayAlias f3 u d
     |_ -> UidM.update_or SymPtr.MayAlias f3 u d
     end *)
-  
-  (* |Load(ty, op) -> UidM.update_or SymPtr.MayAlias f3 u d *)
-
-  (* |Call(ty, op, lst) -> UidM.update_or SymPtr.MayAlias f3 u d *)
-
-  (* |Gep(ty, op, ops) -> UidM.update_or SymPtr.MayAlias f3 u d *)
+  (*
+  |Store(ty, op1, op2) -> 
+    begin match op1 with
+    |Id uid -> UidM.update_or SymPtr.MayAlias f3 uid d
+    |_ -> UidM.update_or SymPtr.MayAlias f3 u d
+    end *)
 
   | _ -> UidM.update_or SymPtr.UndefAlias f2 u d
 
