@@ -292,7 +292,26 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
       print_endline str; *)
       u,new_i
       ) b.insns in
-    let new_b = {insns = new_insns; term = b.term} in
+    let u_term, term = b.term in
+    let new_term = begin match term with
+    | Ret(ty, opt) -> 
+      begin match opt with
+      | Some op -> 
+        begin match op with
+        | Id uid -> 
+          let m = cb u_term in
+          begin match (UidM.find_or t1 m uid) with
+          | SymConst.Const c -> Ret(ty, Some(Const c))
+          | _ -> term
+          end
+        | _ -> term
+        end
+      | None -> term
+      end
+    (* | Cbr(op, lbl1, lbl2) -> TODO: this shiet shamener babajan*)
+    | Br lbl -> term 
+    end in
+    let new_b = {insns = new_insns; term = (u_term, new_term)} in
     let new_m = LblM.update_or b (fun x -> new_b) l cfg.blocks in
     {blocks = new_m; preds = cfg.preds; ret_ty = cfg.ret_ty; args = cfg.args}
   in
