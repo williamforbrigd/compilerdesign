@@ -34,6 +34,33 @@ let f1 (a:'a) : 'a = SymConst.NonConst
 (* let f2 (a:'a) : 'a =  *)
 let f3 (a:'a) : 'a = SymConst.UndefConst
 
+let get_value_bop bop c1 c2 = 
+  begin match bop with
+  | Add -> Int64.add c1 c2
+  | Sub -> Int64.sub c1 c2
+  | Mul -> Int64.mul c1 c2
+  | Shl -> Int64.shift_left c1 (Int64.to_int c2)
+  | Lshr -> Int64.shift_right_logical c1 (Int64.to_int c2)
+  | Ashr -> Int64.shift_right c1 (Int64.to_int c2)
+  | And -> Int64.logand c1 c2 
+  | Or -> Int64.logor c1 c2 
+  | Xor -> Int64.logxor c1 c2 
+  |_ -> failwith "not found"
+ end
+
+let get_value_cnd cnd c1 c2 = 
+  let eq = Int64.equal c1 c2 in
+  let comp = Int64.compare c1 c2 in
+  begin match cnd with
+  | Eq -> if eq then 1L else 0L
+  | Ne -> if eq then 0L else 1L
+  | Slt -> if comp < 0 then 1L else 0L
+  | Sle -> if comp < 0 || comp == 0 then 1L else 0L
+  | Sgt -> if comp > 0 then 1L else 0L
+  | Sge -> if comp > 0 || comp == 0 then 1L else 0L
+  | _ -> failwith "not found"
+  end
+
 
 (* flow function across Ll instructions ------------------------------------- *)
 (* - Uid of a binop or icmp with const arguments is constant-out
@@ -43,51 +70,84 @@ let f3 (a:'a) : 'a = SymConst.UndefConst
    - Uid of all other instructions are NonConst-out
  *)
 
-(* let get_value bop c1 c2 = 
-  begin match bop with
-  | Add -> Int64.add c1 c2
-  | Sub -> Int64.sub c1 c2
-  | Mul -> Int64.mul c1 c2
-  |_ -> UidM.empty
-  end *)
 
 let insn_flow (u,i:uid * insn) (d:fact) : fact =
   let t1 = SymConst.NonConst in
   let t2 x = SymConst.Const x in
   let t3 = SymConst.UndefConst in
+
   begin match i with
-  
-  (**Binop if one if the operands is a UndefConst *)
-  |Binop(bop, ty, op1, op2) -> 
+  |Binop(bop, ty, op1, op2) ->
     begin match op1, op2 with
-    |Id uid1, Id uid2 -> 
+    | Const c1, Const c2 ->
+      let value = get_value_bop bop c1 c2 in
+      UidM.update_or t1 (fun x -> t2 (value)) u d
+    | Id uid1, Id uid2 -> 
       let find1 = UidM.find_or t1 d uid1 in
       let find2 = UidM.find_or t1 d uid2 in
-      begin match find1,find2 with 
-      |SymConst.UndefConst, SymConst.UndefConst-> UidM.update_or t1 f3 u d
-      |_, SymConst.UndefConst-> UidM.update_or t1 f3 u d
-      |SymConst.UndefConst, _ -> UidM.update_or t1 f3 u d
-      |_,_ -> UidM.update_or t1 f1 u d
+      begin match find1, find2 with
+      | SymConst.Const c1, SymConst.Const c2 ->
+        let value = get_value_bop bop c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value) u d
+      | _,_ -> UidM.update_or t1 f1 u d
       end
-    |Id uid, _ -> 
+    |Const c1, Id uid -> 
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.UndefConst-> UidM.update_or t3 f3 u d
-      | _ -> UidM.update_or t1 f1 u d
+      |SymConst.Const c2 -> 
+        let value = get_value_bop bop c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value ) u d
+      |_ -> UidM.update_or t1 f1 u d
       end
-    | _, Id uid -> 
+    |Id uid, Const c2 -> 
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.UndefConst-> UidM.update_or t3 f3 u d
-      | _ -> UidM.update_or t1 f1 u d
+      |SymConst.Const c1 -> 
+        let value = get_value_bop bop c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value ) u d
+      |_ -> UidM.update_or t1 f1 u d
       end
     | _,_ -> UidM.update_or t1 f1 u d
     end
-  
+
+  |Icmp(cnd, top, op1, op2) -> 
+    begin match op1, op2 with
+    |Const c1, Const c2 ->
+      let value = get_value_cnd cnd c1 c2 in
+      UidM.update_or t1 (fun x -> t2 value) u d
+    | Id uid1, Id uid2 -> 
+      let find1 = UidM.find_or t1 d uid1 in
+      let find2 = UidM.find_or t1 d uid2 in
+      begin match find1, find2 with
+      | SymConst.Const c1, SymConst.Const c2 ->
+        let value = get_value_cnd cnd c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value) u d
+      | _,_ -> UidM.update_or t1 f1 u d
+      end
+    |Const c1, Id uid -> 
+      let find = UidM.find_or t1 d uid in
+      begin match find with
+      |SymConst.Const c2 -> 
+        let value = get_value_cnd cnd c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value ) u d
+      |_ -> UidM.update_or t1 f1 u d
+      end
+    |Id uid, Const c2 -> 
+      let find = UidM.find_or t1 d uid in
+      begin match find with
+      |SymConst.Const c1 -> 
+        let value = get_value_cnd cnd c1 c2 in
+        UidM.update_or t1 (fun x -> t2 value ) u d
+      |_ -> UidM.update_or t1 f1 u d
+      end
+    |_,_ -> UidM.update_or t1 f1 u d
+    end
+
   |Store(ty, op1, op2) -> UidM.update_or t1 f3 u d 
+
   |Call(ty, op, lst) -> 
     begin match ty with
-    |Void -> UidM.update_or t1 f3 u d
+    |Void -> UidM.update_or t3 f3 u d
     |_ -> UidM.update_or t1 f1 u d 
     end
 
