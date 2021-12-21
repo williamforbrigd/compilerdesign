@@ -20,10 +20,10 @@ module SymConst =
       | Const i -> Printf.sprintf "Const (%LdL)" i
       | UndefConst -> "UndefConst"
 
-    
+
   end
 
-(* The analysis computes, at each program point, which UIDs in scope will evaluate 
+(* The analysis computes, at each program point, which UIDs in scope will evaluate
    to integer constants *)
 type fact = SymConst.t UidM.t
 
@@ -34,7 +34,7 @@ let f1 (a:'a) : 'a = SymConst.NonConst
 (* let f2 (a:'a) : 'a =  *)
 let f3 (a:'a) : 'a = SymConst.UndefConst
 
-let get_value_bop bop c1 c2 = 
+let get_value_bop bop c1 c2 =
   begin match bop with
   | Add -> Int64.add c1 c2
   | Sub -> Int64.sub c1 c2
@@ -42,13 +42,13 @@ let get_value_bop bop c1 c2 =
   | Shl -> Int64.shift_left c1 (Int64.to_int c2)
   | Lshr -> Int64.shift_right_logical c1 (Int64.to_int c2)
   | Ashr -> Int64.shift_right c1 (Int64.to_int c2)
-  | And -> Int64.logand c1 c2 
-  | Or -> Int64.logor c1 c2 
-  | Xor -> Int64.logxor c1 c2 
+  | And -> Int64.logand c1 c2
+  | Or -> Int64.logor c1 c2
+  | Xor -> Int64.logxor c1 c2
   |_ -> failwith "not found"
  end
 
-let get_value_cnd cnd c1 c2 = 
+let get_value_cnd cnd c1 c2 =
   let eq = Int64.equal c1 c2 in
   let comp = Int64.compare c1 c2 in
   begin match cnd with
@@ -82,7 +82,7 @@ let insn_flow (u,i:uid * insn) (d:fact) : fact =
     | Const c1, Const c2 ->
       let value = get_value_bop bop c1 c2 in
       UidM.update_or t1 (fun x -> t2 (value)) u d
-    | Id uid1, Id uid2 -> 
+    | Id uid1, Id uid2 ->
       let find1 = UidM.find_or t1 d uid1 in
       let find2 = UidM.find_or t1 d uid2 in
       begin match find1, find2 with
@@ -91,18 +91,18 @@ let insn_flow (u,i:uid * insn) (d:fact) : fact =
         UidM.update_or t1 (fun x -> t2 value) u d
       | _,_ -> UidM.update_or t1 f1 u d
       end
-    |Const c1, Id uid -> 
+    |Const c1, Id uid ->
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.Const c2 -> 
+      |SymConst.Const c2 ->
         let value = get_value_bop bop c1 c2 in
         UidM.update_or t1 (fun x -> t2 value ) u d
       |_ -> UidM.update_or t1 f1 u d
       end
-    |Id uid, Const c2 -> 
+    |Id uid, Const c2 ->
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.Const c1 -> 
+      |SymConst.Const c1 ->
         let value = get_value_bop bop c1 c2 in
         UidM.update_or t1 (fun x -> t2 value ) u d
       |_ -> UidM.update_or t1 f1 u d
@@ -110,12 +110,12 @@ let insn_flow (u,i:uid * insn) (d:fact) : fact =
     | _,_ -> UidM.update_or t1 f1 u d
     end
 
-  |Icmp(cnd, top, op1, op2) -> 
+  |Icmp(cnd, top, op1, op2) ->
     begin match op1, op2 with
     |Const c1, Const c2 ->
       let value = get_value_cnd cnd c1 c2 in
       UidM.update_or t1 (fun x -> t2 value) u d
-    | Id uid1, Id uid2 -> 
+    | Id uid1, Id uid2 ->
       let find1 = UidM.find_or t1 d uid1 in
       let find2 = UidM.find_or t1 d uid2 in
       begin match find1, find2 with
@@ -124,18 +124,18 @@ let insn_flow (u,i:uid * insn) (d:fact) : fact =
         UidM.update_or t1 (fun x -> t2 value) u d
       | _,_ -> UidM.update_or t1 f1 u d
       end
-    |Const c1, Id uid -> 
+    |Const c1, Id uid ->
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.Const c2 -> 
+      |SymConst.Const c2 ->
         let value = get_value_cnd cnd c1 c2 in
         UidM.update_or t1 (fun x -> t2 value ) u d
       |_ -> UidM.update_or t1 f1 u d
       end
-    |Id uid, Const c2 -> 
+    |Id uid, Const c2 ->
       let find = UidM.find_or t1 d uid in
       begin match find with
-      |SymConst.Const c1 -> 
+      |SymConst.Const c1 ->
         let value = get_value_cnd cnd c1 c2 in
         UidM.update_or t1 (fun x -> t2 value ) u d
       |_ -> UidM.update_or t1 f1 u d
@@ -143,12 +143,12 @@ let insn_flow (u,i:uid * insn) (d:fact) : fact =
     |_,_ -> UidM.update_or t1 f1 u d
     end
 
-  |Store(ty, op1, op2) -> UidM.update_or t1 f3 u d 
+  |Store(ty, op1, op2) -> UidM.update_or t1 f3 u d
 
-  |Call(ty, op, lst) -> 
+  |Call(ty, op, lst) ->
     begin match ty with
     |Void -> UidM.update_or t3 f3 u d
-    |_ -> UidM.update_or t1 f1 u d 
+    |_ -> UidM.update_or t1 f1 u d
     end
 
   | _ -> UidM.update_or t1 f1 u d
@@ -165,11 +165,11 @@ module Fact =
 
     let insn_flow = insn_flow
     let terminator_flow = terminator_flow
-    
-    let normalize : fact -> fact = 
+
+    let normalize : fact -> fact =
       UidM.filter (fun _ v -> v != SymConst.UndefConst)
 
-    let compare (d:fact) (e:fact) : int  = 
+    let compare (d:fact) (e:fact) : int  =
       UidM.compare SymConst.compare (normalize d) (normalize e)
 
     let to_string : fact -> string =
@@ -177,9 +177,9 @@ module Fact =
 
     (* The constprop analysis should take the meet over predecessors to compute the
        flow into a node. You may find the UidM.merge function useful *)
-    let combine (ds:fact list) : fact = 
-      ds |> List.fold_left (fun acc elt -> 
-        UidM.merge (fun key x0 y0 -> 
+    let combine (ds:fact list) : fact =
+      ds |> List.fold_left (fun acc elt ->
+        UidM.merge (fun key x0 y0 ->
           begin match x0, y0 with
           |Some x, Some y -> Some x
           |Some x, None-> Some x
@@ -195,32 +195,107 @@ module Solver = Solver.Make (Fact) (Graph)
 
 (* expose a top-level analysis operation ------------------------------------ *)
 let analyze (g:Cfg.t) : Graph.t =
-  (* the analysis starts with every node set to bottom (the map of every uid 
+  (* the analysis starts with every node set to bottom (the map of every uid
      in the function to UndefConst *)
   let init l = UidM.empty in
 
   (* the flow into the entry node should indicate that any parameter to the
      function is not a constant *)
-  let cp_in = List.fold_right 
+  let cp_in = List.fold_right
     (fun (u,_) -> UidM.add u SymConst.NonConst)
-    g.Cfg.args UidM.empty 
+    g.Cfg.args UidM.empty
   in
   let fg = Graph.of_cfg init cp_in g in
   Solver.solve fg
 
-
 (* run constant propagation on a cfg given analysis results ----------------- *)
-(* HINT: your cp_block implementation will probably rely on several helper 
+(* HINT: your cp_block implementation will probably rely on several helper
    functions.                                                                 *)
 let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
   let open SymConst in
-  
+
+  let t1 = SymConst.NonConst in
+  let t2 x = SymConst.Const x in
+  let t3 = SymConst.UndefConst in
+
+  let cp_insn (i : Ll.insn) (m : Fact.t) (u : Ll.uid) : Ll.insn = 
+    match i with
+    | Binop(bop, ty, op1, op2) ->
+      begin match op1, op2 with
+      | Id uid1, Id uid2 -> 
+        begin match (UidM.find_or t1 m uid1, UidM.find_or t1 m uid2) with
+        | SymConst.Const c1, SymConst.Const c2 -> Binop(bop, ty, Const c1, Const c2)
+        | SymConst.Const c, _ -> Binop(bop, ty, Const c, op2)
+        | _, SymConst.Const c -> Binop(bop, ty, op1, Const c)
+        end
+      |Id uid, _ ->
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Binop(bop, ty, Const c, op2)
+        | _ -> i
+        end
+      |_, Id uid -> 
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Binop(bop, ty, op1, Const c)
+        | _ -> i
+        end
+      | _,_ -> i
+      end
+
+    | Load(ty, op) -> 
+      begin match op with
+      | Id uid -> 
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Load(ty, Const c)
+        | _ -> i
+        end
+      end
+
+    | Store(ty, op1, op2) -> 
+      begin match op1, op2 with
+      | Id uid1, Id uid2 -> 
+        begin match (UidM.find_or t1 m uid1, UidM.find_or t1 m uid2) with
+        | SymConst.Const c1, SymConst.Const c2 -> Store(ty, Const c1, Const c2) 
+        | SymConst.Const c, _ -> Store(ty, Const c, op2)
+        | _, SymConst.Const c -> Store(ty, op1, Const c)
+        end
+      |Id uid, _ ->
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Store(ty, Const c, op2) 
+        | _ -> i
+        end
+      |_, Id uid -> 
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Store(ty, op1, Const c)
+        | _ -> i
+        end
+      | _,_ -> i
+      end
+
+    | _ -> i (**the other instructions does not have an operand, so just return the same i*)
+  in
 
   let cp_block (l:Ll.lbl) (cfg:Cfg.t) : Cfg.t =
     let b = Cfg.block cfg l in
     let cb = Graph.uid_out cg l in
+    (* print_endline (Llutil.string_of_block b); *)
+    (*Ll.uid -> Fact.t*)
+    (* print_endline (cfg); *)
     (* failwith "Constprop.cp_block unimplemented" *)
-    cfg
+    let new_insns = List.map(fun insn ->
+      let u,i = insn in
+      let m = cb u in
+      let new_i = cp_insn i m u in
+      (* let str = begin match i with
+      | Binop(bop, ty, op1, op2) -> "old: " ^ Llutil.string_of_insn i ^ " new: " ^ Llutil.string_of_insn new_i
+      | _ -> "nop"
+      end in
+      print_endline str; *)
+      u,new_i
+      ) b.insns in
+    let new_b = {insns = new_insns; term = b.term} in
+    let new_m = LblM.update_or b (fun x -> new_b) l cfg.blocks in
+    {blocks = new_m; preds = cfg.preds; ret_ty = cfg.ret_ty; args = cfg.args}
   in
+    
 
   LblS.fold cp_block (Cfg.nodes cfg) cfg
