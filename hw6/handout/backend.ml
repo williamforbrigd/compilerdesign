@@ -781,6 +781,7 @@ let better_layout (f:Ll.fdecl) (live:liveness) : layout =
         )
       IFG.empty f
   in
+  (*TODO: the coloring has to be done recursively but*)
   let rec color ifg lo = 
     if IFG.is_empty ifg then lo 
     else
@@ -794,6 +795,7 @@ let better_layout (f:Ll.fdecl) (live:liveness) : layout =
       in
   in color ifg []
   in
+  (*TODO: fold the fdecl again and give registers based on colors*)
   (* let lo, n_spilled = 
     fold_fdecl
       (fun (lo, n) (u, ty) -> (u, alloc_arg ())::lo, n)
