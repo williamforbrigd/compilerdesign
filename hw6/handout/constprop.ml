@@ -218,61 +218,106 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
   let t2 x = SymConst.Const x in
   let t3 = SymConst.UndefConst in
 
+  let cp_op op m : operand = 
+    begin match op with
+    | Id uid -> 
+        begin match UidM.find_or t1 m uid with
+        | SymConst.Const c -> Const c 
+        | _ -> op
+        end
+    | _ -> op
+    end 
+  in
+
+  let cp_ops op1 op2 m : (operand * operand) = 
+    begin match op1, op2 with
+    | Id uid1, Id uid2 -> 
+      begin match (UidM.find_or t1 m uid1, UidM.find_or t1 m uid2) with
+      | SymConst.Const c1, SymConst.Const c2 -> Const c1, Const c2
+      | SymConst.Const c, _ -> Const c, op2
+      | _, SymConst.Const c -> op1, Const c
+      | _,_ -> op1,op2
+      end
+    |Id uid, _ ->
+      begin match (UidM.find_or t1 m uid) with
+      | SymConst.Const c -> Const c, op2 
+      | _ -> op1, op2 
+      end
+    |_, Id uid -> 
+      begin match (UidM.find_or t1 m uid) with
+      | SymConst.Const c -> op1, Const c 
+      | _ -> op1, op2 
+      end
+    | _,_ -> op1, op2
+    end
+  in
+
   let cp_insn (i : Ll.insn) (m : Fact.t) (u : Ll.uid) : Ll.insn = 
     match i with
     | Binop(bop, ty, op1, op2) ->
-      begin match op1, op2 with
-      | Id uid1, Id uid2 -> 
-        begin match (UidM.find_or t1 m uid1, UidM.find_or t1 m uid2) with
-        | SymConst.Const c1, SymConst.Const c2 -> Binop(bop, ty, Const c1, Const c2)
-        | SymConst.Const c, _ -> Binop(bop, ty, Const c, op2)
-        | _, SymConst.Const c -> Binop(bop, ty, op1, Const c)
-        end
-      |Id uid, _ ->
-        begin match (UidM.find_or t1 m uid) with
-        | SymConst.Const c -> Binop(bop, ty, Const c, op2)
-        | _ -> i
-        end
-      |_, Id uid -> 
-        begin match (UidM.find_or t1 m uid) with
-        | SymConst.Const c -> Binop(bop, ty, op1, Const c)
-        | _ -> i
-        end
-      | _,_ -> i
-      end
+      let op1', op2' = cp_ops op1 op2 m in
+      Binop(bop, ty, op1', op2')
 
     | Load(ty, op) -> 
-      begin match op with
-      | Id uid -> 
-        begin match (UidM.find_or t1 m uid) with
-        | SymConst.Const c -> Load(ty, Const c)
-        | _ -> i
-        end
-      end
+      let op' = cp_op op m in
+      Load(ty, op')
 
     | Store(ty, op1, op2) -> 
-      begin match op1, op2 with
-      | Id uid1, Id uid2 -> 
-        begin match (UidM.find_or t1 m uid1, UidM.find_or t1 m uid2) with
-        | SymConst.Const c1, SymConst.Const c2 -> Store(ty, Const c1, Const c2) 
-        | SymConst.Const c, _ -> Store(ty, Const c, op2)
-        | _, SymConst.Const c -> Store(ty, op1, Const c)
-        end
-      |Id uid, _ ->
-        begin match (UidM.find_or t1 m uid) with
-        | SymConst.Const c -> Store(ty, Const c, op2) 
-        | _ -> i
-        end
-      |_, Id uid -> 
-        begin match (UidM.find_or t1 m uid) with
-        | SymConst.Const c -> Store(ty, op1, Const c)
-        | _ -> i
-        end
-      | _,_ -> i
-      end
+      let op1', op2' = cp_ops op1 op2 m in
+      Store(ty, op1', op2')
+    
+    | Icmp(cnd, ty, op1, op2) -> 
+      let op1', op2' = cp_ops op1 op2 m in
+      Icmp(cnd, ty, op1', op2')
+
+    | Call(ty, op, args) -> 
+      let op' = cp_op op m in
+      let new_args = List.map(fun arg -> 
+        let t, op1 = arg in
+        let op1' = cp_op op1 m in
+        t, op1'
+        ) args in
+      Call(ty, op', new_args)
+
+    | Bitcast(ty1, op, ty2) -> 
+      let op' = cp_op op m in
+      Bitcast(ty1, op', ty2)
+
+    | Gep(ty, op1, ops) -> 
+      (*TODO: constant propagate all the ops list or*)
+      let op1' = cp_op op1 m in
+      Gep(ty, op1', ops)
 
     | _ -> i (**the other instructions does not have an operand, so just return the same i*)
   in
+
+  let cp_term term m = 
+    match term with
+    | Ret(ty, opt) -> 
+      begin match opt with
+      | Some op -> 
+        begin match op with
+        | Id uid -> 
+          begin match (UidM.find_or t1 m uid) with
+          | SymConst.Const c -> Ret(ty, Some(Const c))
+          | _ -> term
+          end
+        | _ -> term
+        end
+      | None -> term
+      end
+    | Cbr(op, lbl1, lbl2) ->
+      begin match op with
+      | Id uid -> 
+        begin match (UidM.find_or t1 m uid) with
+        | SymConst.Const c -> Cbr(Const c, lbl1, lbl2)
+        | _ -> term
+        end
+      | _ -> term
+      end
+    | Br lbl -> term
+  in
+
 
   let cp_block (l:Ll.lbl) (cfg:Cfg.t) : Cfg.t =
     let b = Cfg.block cfg l in
@@ -293,24 +338,8 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
       u,new_i
       ) b.insns in
     let u_term, term = b.term in
-    let new_term = begin match term with
-    | Ret(ty, opt) -> 
-      begin match opt with
-      | Some op -> 
-        begin match op with
-        | Id uid -> 
-          let m = cb u_term in
-          begin match (UidM.find_or t1 m uid) with
-          | SymConst.Const c -> Ret(ty, Some(Const c))
-          | _ -> term
-          end
-        | _ -> term
-        end
-      | None -> term
-      end
-    (* | Cbr(op, lbl1, lbl2) -> TODO: this shiet shamener babajan*)
-    | Br lbl -> term 
-    end in
+    let m = cb u_term in
+    let new_term = cp_term term m in
     let new_b = {insns = new_insns; term = (u_term, new_term)} in
     let new_m = LblM.update_or b (fun x -> new_b) l cfg.blocks in
     {blocks = new_m; preds = cfg.preds; ret_ty = cfg.ret_ty; args = cfg.args}
