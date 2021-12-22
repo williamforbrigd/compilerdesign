@@ -284,9 +284,9 @@ let run (cg:Graph.t) (cfg:Cfg.t) : Cfg.t =
       Bitcast(ty1, op', ty2)
 
     | Gep(ty, op1, ops) -> 
-      (*TODO: constant propagate all the ops list or*)
       let op1' = cp_op op1 m in
-      Gep(ty, op1', ops)
+      let ops' = List.map(fun op -> cp_op op m) ops in
+      Gep(ty, op1', ops')
 
     | _ -> i (**the other instructions does not have an operand, so just return the same i*)
   in
