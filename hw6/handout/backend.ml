@@ -740,7 +740,73 @@ let greedy_layout (f:Ll.fdecl) (live:liveness) : layout =
 *)
 
 let better_layout (f:Ll.fdecl) (live:liveness) : layout =
-  failwith "Backend.better_layout not implemented"
+  let n_arg = ref 0 in
+  let n_spill = ref 0 in
+  let spill () = (incr n_spill; Alloc.LStk (- !n_spill)) in
+  let alloc_arg () = 
+    let res = 
+      match arg_loc !n_arg with
+      | Alloc.LReg Rcx -> spill ()
+      | x -> x
+    in
+    incr n_arg; res
+  in
+  let pal = LocSet.(caller_save
+                    |> remove(Alloc.LReg Rax)
+                    |> remove(Alloc.LReg Rcx)
+                    ) 
+  in
+  (* type liveness = {live_in : uid -> UidS.t; live_out : uid -> UidS.t} *)
+  (*Though is that the IFG is a map from a uid to all the uid that is connected to the uid*)
+  (*IFG is a map from a temp or a program point node to all the variables that are live at that time.*)
+  let module IFG = Datastructures.UidM in
+  (*rax and rcx are reserved for spilling*)
+  let ifg = IFG.empty in
+  (*1 and 2: compute liveness information for each temp and create the interference graph based on this*)
+  let ifg = 
+    fold_fdecl
+      (fun ifg (u, ty) -> ifg)
+      (fun ifg l -> ifg)
+      (fun ifg (u,i) -> 
+        let s_in = live.live_in u in
+        (* print_endline ("Live vars in: "^ UidSet.to_string s_in); *)
+        IFG.add u s_in ifg 
+        )
+      (fun ifg (u,t) -> 
+        let s_in = live.live_in u in
+        (* let count = UidSet.fold(fun elt c -> c+1) s_in 0 in *)
+        (* print_endline ("the number of live vars in: " ^ string_of_int count); *)
+        (* print_endline ("Live vars in term: "^ UidSet.to_string s_in); *)
+        IFG.add u s_in ifg
+        )
+      IFG.empty f
+  in
+  let rec color ifg lo = 
+    if IFG.is_empty ifg then lo 
+    else
+      try
+        let n = IFG.choose ifg in
+        let k, s = n in
+        let c = UidSet.fold(fun elt c -> c+1) s 0 in
+        
+      with
+      | Not_found -> lo 
+      in
+  in color ifg []
+  in
+  (* let lo, n_spilled = 
+    fold_fdecl
+      (fun (lo, n) (u, ty) -> (u, alloc_arg ())::lo, n)
+      (fun (lo, n) l -> (l, Alloc.LLbl (Platform.mangle l))::lo, n)
+      (fun (lo, n) (u, i) -> 
+        let s_in = IFG.
+        lo, n)
+      (fun (lo, n) (u, t) -> lo, n)
+      ([], !n_spill) f 
+  in *)
+  {uid_loc = (fun u -> List.assoc u lo)
+  ; spill_bytes = 8 * n_spilled
+  }
 
 
 
