@@ -748,9 +748,7 @@ let better_layout (f : Ll.fdecl) (live : liveness) : layout =
       (fun ifg (u, i) ->
         let s_in = live.live_in u in
         IFG.add u s_in ifg)
-      (fun ifg (u,t) ->
-        let s_in = live.live_in u in
-        IFG.add u s_in ifg)
+      (fun ifg _ -> ifg)
       IFG.empty f
   in
   let module ColorMap = Datastructures.UidM in
@@ -824,8 +822,7 @@ let better_layout (f : Ll.fdecl) (live : liveness) : layout =
         else
           let opt = arg_reg_caller_save c in
           begin match opt with
-          | Some reg -> 
-            (u, Alloc.LReg(reg)) :: lo
+          | Some reg -> (u, Alloc.LReg(reg)) :: lo
           | None -> (u, spill()) :: lo
           end
         )
