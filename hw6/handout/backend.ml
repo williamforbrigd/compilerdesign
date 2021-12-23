@@ -737,12 +737,9 @@ let better_layout (f : Ll.fdecl) (live : liveness) : layout =
     LocSet.(caller_save |> remove (Alloc.LReg Rax) |> remove (Alloc.LReg Rcx))
   in
   let k = LocSet.fold (fun elt c -> c + 1) pal 0 in
-  (* type liveness = {live_in : uid -> UidS.t; live_out : uid -> UidS.t} *)
-  (*Though is that the IFG is a map from a uid to all the uid that is connected to the uid*)
-  (*IFG is a map from a temp or a program point node to all the variables that are live at that time.*)
   let module IFG = Datastructures.UidM in
-  (*rax and rcx are reserved for spilling*)
   let ifg = IFG.empty in
+
   (*1 and 2: compute liveness information for each temp and create the interference graph based on this*)
   let ifg =
     fold_fdecl
@@ -750,15 +747,10 @@ let better_layout (f : Ll.fdecl) (live : liveness) : layout =
       (fun ifg l -> ifg)
       (fun ifg (u, i) ->
         let s_in = live.live_in u in
-        (* print_endline ("Live vars in: "^ UidSet.to_string s_in); *)
         IFG.add u s_in ifg)
-      (fun ifg _ ->
-        (* let s_in = live.live_in u in *)
-        (* let count = UidSet.fold(fun elt c -> c+1) s_in 0 in *)
-        (* print_endline ("the number of live vars in: " ^ string_of_int count); *)
-        (* print_endline ("Live vars in term: "^ UidSet.to_string s_in); *)
-        (* IFG.add u s_in ifg) *)
-        ifg)
+      (fun ifg (u,t) ->
+        let s_in = live.live_in u in
+        IFG.add u s_in ifg)
       IFG.empty f
   in
   let module ColorMap = Datastructures.UidM in
@@ -803,8 +795,7 @@ let better_layout (f : Ll.fdecl) (live : liveness) : layout =
     "" wstack
   |> print_endline; *)
  
-  let c = ref 0 in
-
+  let cmap = ColorMap.empty in
   let rec color wstack cmap used_c =
     try
       let elt = Stack.pop wstack in
